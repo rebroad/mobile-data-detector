@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Three UK Mobile Data Detector
-Uses public IP analysis to detect Three UK mobile data and apply bandwidth throttling
+Mobile Data Detector
+Uses public IP analysis to detect mobile data usage and apply bandwidth throttling
+Supports multiple carriers with Three UK as default
 """
 
 import subprocess
@@ -33,12 +34,12 @@ class MobileDetector:
         self.usage_file = "/var/lib/mobile_data_monitor/usage.json"
         self.running = False
         
-        # Three UK specific indicators
-        self.three_uk_domains = [
+        # Mobile carrier domains (Three UK as default)
+        self.mobile_carrier_domains = self.config.get('mobile_carrier_domains', [
             'threembb.co.uk',
-            'three.co.uk',
+            'three.co.uk', 
             'three.com'
-        ]
+        ])
         
         # Initialize usage tracking
         self.init_usage_tracking()
@@ -52,7 +53,12 @@ class MobileDetector:
             'android_connections': ["Ed's iPhone", "Android", "Personal Hotspot", "USB Tethering"],
             'enable_throttling': True,
             'min_bandwidth_mbps': 0.5,
-            'max_bandwidth_mbps': 50
+            'max_bandwidth_mbps': 50,
+            'mobile_carrier_domains': [
+                'threembb.co.uk',
+                'three.co.uk',
+                'three.com'
+            ]
         }
         
         if os.path.exists(self.config_file):
@@ -161,8 +167,8 @@ class MobileDetector:
             logger.error(f"Error getting hostname for {ip}: {e}")
             return None
     
-    def is_three_uk_mobile_data(self) -> bool:
-        """Check if public IP belongs to Three UK mobile data"""
+    def is_mobile_data(self) -> bool:
+        """Check if public IP belongs to mobile data network"""
         public_ip = self.get_public_ip()
         if not public_ip:
             return False
@@ -173,10 +179,10 @@ class MobileDetector:
         
         logger.info(f"Public IP: {public_ip}, Hostname: {hostname}")
         
-        # Check if hostname contains Three UK domains
-        for domain in self.three_uk_domains:
+        # Check if hostname contains mobile carrier domains
+        for domain in self.mobile_carrier_domains:
             if domain in hostname.lower():
-                logger.info(f"Three UK mobile data detected: {hostname}")
+                logger.info(f"Mobile data detected: {hostname}")
                 return True
         
         return False
@@ -403,18 +409,18 @@ class MobileDetector:
             logger.error(f"Error removing bandwidth throttling: {e}")
     
     def detect_mobile_data(self) -> bool:
-        """Detect if using Three UK mobile data"""
+        """Detect if using mobile data"""
         if not self.is_android_connection():
             return False
         
-        return self.is_three_uk_mobile_data()
+        return self.is_mobile_data()
     
     def monitor_network(self):
         """Main monitoring loop"""
         last_state = "unknown"
         last_bandwidth_check = 0
         
-        logger.info("Starting Three UK mobile data monitoring...")
+        logger.info("Starting mobile data monitoring...")
         
         while self.running:
             try:
@@ -431,13 +437,13 @@ class MobileDetector:
                     remaining_percent = self.get_remaining_allowance_percent()
                     
                     if last_state != "mobile":
-                        logger.info(f"Three UK mobile data detected - applying bandwidth throttling")
+                        logger.info(f"Mobile data detected - applying bandwidth throttling")
                         self.apply_bandwidth_throttling(remaining_percent)
                         last_state = "mobile"
                         
                         # Notify user
                         try:
-                            subprocess.run(["notify-send", "Three UK Mobile Data Active", 
+                            subprocess.run(["notify-send", "Mobile Data Active", 
                                           f"Bandwidth throttling applied. {remaining_percent}% allowance remaining.", 
                                           "-u", "normal"], capture_output=True)
                         except:
@@ -518,7 +524,7 @@ def main():
         
         if command == "test":
             # Run a comprehensive detection test
-            print("=== Three UK Mobile Data Detection Test ===")
+            print("=== Mobile Data Detection Test ===")
             
             # Test public IP
             print("\n1. Public IP Analysis:")
@@ -528,10 +534,10 @@ def main():
                 hostname = detector.get_public_ip_hostname(public_ip)
                 if hostname:
                     print(f"   Hostname: {hostname}")
-                    if detector.is_three_uk_mobile_data():
-                        print("   ✓ Three UK mobile data detected")
+                    if detector.is_mobile_data():
+                        print("   ✓ Mobile data detected")
                     else:
-                        print("   ✗ Not Three UK mobile data")
+                        print("   ✗ Not mobile data")
                 else:
                     print("   ✗ Could not resolve hostname")
             else:
@@ -560,7 +566,7 @@ def main():
             
             if is_android:
                 is_mobile = detector.detect_mobile_data()
-                print(f"Three UK mobile data: {is_mobile}")
+                print(f"Mobile data: {is_mobile}")
                 
                 if is_mobile:
                     remaining_percent = detector.get_remaining_allowance_percent()
@@ -576,7 +582,7 @@ def main():
             # Show detailed usage statistics
             usage_stats = detector.get_usage_stats()
             if usage_stats:
-                print("=== Three UK Mobile Data Usage Statistics ===")
+                print("=== Mobile Data Usage Statistics ===")
                 print(f"Total usage: {usage_stats['total_gb']}GB / {usage_stats['allowance_gb']}GB")
                 print(f"Remaining: {usage_stats['remaining_percent']}%")
                 print(f"Allowance remaining: {usage_stats['remaining_gb']}GB")

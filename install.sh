@@ -49,13 +49,16 @@ systemctl daemon-reload
 # Create default configuration
 echo -e "${YELLOW}Creating default configuration...${NC}"
 cat > /etc/mobile_data_monitor.conf << EOF
-# Three UK Mobile Data Monitor Configuration
+# Mobile Data Monitor Configuration
 DETECTION_INTERVAL=30
 BANDWIDTH_CHECK_INTERVAL=60
 MONTHLY_ALLOWANCE_GB=60
 
 # Android connection identifiers (partial matches)
 ANDROID_CONNECTIONS="Ed's iPhone,Android,Personal Hotspot,USB Tethering"
+
+# Mobile carrier domains (comma-separated, Three UK by default)
+MOBILE_CARRIER_DOMAINS="threembb.co.uk,three.co.uk,three.com"
 
 # Bandwidth throttling settings
 ENABLE_THROTTLING=true
@@ -81,7 +84,7 @@ EOF
 echo -e "${YELLOW}Creating user commands...${NC}"
 cat > /usr/local/bin/mobile-status << 'EOF'
 #!/bin/bash
-echo "=== Three UK Mobile Data Detector Status ==="
+echo "=== Mobile Data Detector Status ==="
 systemctl status mobile-detector.service --no-pager -l
 echo ""
 echo "=== Detection Test ==="
@@ -90,13 +93,13 @@ EOF
 
 cat > /usr/local/bin/mobile-test << 'EOF'
 #!/bin/bash
-echo "=== Three UK Mobile Data Detection Test ==="
+echo "=== Mobile Data Detection Test ==="
 python3 /usr/local/bin/mobile_detector test
 EOF
 
 cat > /usr/local/bin/mobile-usage << 'EOF'
 #!/bin/bash
-echo "=== Three UK Mobile Data Usage ==="
+echo "=== Mobile Data Usage ==="
 python3 /usr/local/bin/mobile_detector usage
 EOF
 
@@ -139,4 +142,4 @@ echo ""
 echo -e "${BLUE}Configuration:${NC}"
 echo "  Edit /etc/mobile_data_monitor.conf to customize settings"
 echo ""
-echo -e "${YELLOW}The service is now running and will automatically detect Three UK mobile data usage.${NC}"
+echo -e "${YELLOW}The service is now running and will automatically detect mobile data usage.${NC}"

@@ -1,6 +1,6 @@
-# Three UK Mobile Data Detector
+# Mobile Data Detector
 
-A simple, reliable system to detect when your Android device is using Three UK mobile data vs WiFi and apply intelligent bandwidth throttling based on your remaining data allowance.
+A simple, reliable system to detect when your Android device is using mobile data vs WiFi and apply intelligent bandwidth throttling based on your remaining data allowance. Supports multiple carriers with Three UK as the default.
 
 ## How It Works
 
@@ -8,7 +8,7 @@ The detector uses **public IP analysis** - the most reliable method to determine
 
 1. **Gets your public IP address** from multiple services (ifconfig.me, icanhazip.com, etc.)
 2. **Resolves the hostname** for that IP address using reverse DNS
-3. **Checks if the hostname contains Three UK domains** (threembb.co.uk, three.co.uk, three.com)
+3. **Checks if the hostname contains mobile carrier domains** (configurable, Three UK by default)
 4. **Applies bandwidth throttling** based on your remaining data allowance
 
 This method is much more reliable than gateway detection or speed tests because:
@@ -80,6 +80,9 @@ MONTHLY_ALLOWANCE_GB=60        # Your monthly data allowance
 # Android connection patterns
 ANDROID_CONNECTIONS="Ed's iPhone,Android,Personal Hotspot,USB Tethering"
 
+# Mobile carrier domains (comma-separated)
+MOBILE_CARRIER_DOMAINS="threembb.co.uk,three.co.uk,three.com"
+
 # Bandwidth throttling
 ENABLE_THROTTLING=true
 MIN_BANDWIDTH_MBPS=0.5         # Minimum speed (0.5 Mbps)
@@ -98,6 +101,45 @@ When mobile data is detected, the system:
    - etc.
 
 3. **Uses Linux Traffic Control (tc)** to limit bandwidth at the network interface level
+
+## Configuring for Different Carriers
+
+To use with a different mobile carrier, update the `MOBILE_CARRIER_DOMAINS` in your configuration file. Here are some common examples:
+
+### Three UK (default)
+```
+MOBILE_CARRIER_DOMAINS="threembb.co.uk,three.co.uk,three.com"
+```
+
+### EE
+```
+MOBILE_CARRIER_DOMAINS="ee.co.uk,ee.com"
+```
+
+### O2
+```
+MOBILE_CARRIER_DOMAINS="o2.co.uk,o2.com"
+```
+
+### Vodafone
+```
+MOBILE_CARRIER_DOMAINS="vodafone.co.uk,vodafone.com"
+```
+
+### Verizon (US)
+```
+MOBILE_CARRIER_DOMAINS="verizon.com,verizonwireless.com"
+```
+
+### AT&T (US)
+```
+MOBILE_CARRIER_DOMAINS="att.com,att.net"
+```
+
+To find your carrier's domains, you can:
+1. Connect to mobile data
+2. Run `mobile-test` to see the detected hostname
+3. Add the relevant domain patterns to your configuration
 
 ## Example Output
 

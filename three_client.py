@@ -265,6 +265,24 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
                 else:
                     print(f"⚠️ OAuth may not have completed successfully. Expected customer-logged?code=... but got: {final_url}")
 
+                    # Debug: Look for error messages on the Auth0 page
+                    error_elements = r.html.find('.alert-error, .error, [class*="error"], [id*="error"]')
+                    if error_elements:
+                        print("🚨 Found error messages on Auth0 page:")
+                        for error in error_elements:
+                            if error.text and error.text.strip():
+                                print(f"  Error: {error.text.strip()[:100]}")
+
+                    # Check if login form is still present (indicating failed login)
+                    username_field = r.html.find('input[name="username"]', first=True)
+                    if username_field:
+                        print("⚠️ Login form still present - login likely failed")
+                        print("  Possible causes:")
+                        print("  1. Incorrect username/password")
+                        print("  2. Account locked/suspended")
+                        print("  3. Captcha required")
+                        print("  4. Two-factor authentication required")
+
             except Exception as login_error:
                 print(f"❌ Auth0 login failed: {login_error}")
                 return None

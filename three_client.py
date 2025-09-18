@@ -224,7 +224,19 @@ def _test_current_cookies(cookie_db_path: str) -> bool:
         # Load current cookies
         cookie_header = load_cookie_header_via_helper(cookie_db_path)
         if not cookie_header:
+            print("  🔍 Debug: No cookies found in database")
             return False
+
+        print(f"  🔍 Debug: Found {len(cookie_header.split(';'))} cookies")
+
+        # Check for key authentication cookies
+        key_cookies = ['WIRELESS_SECURITY_TOKEN', 'auth0', 'auth0_compat']
+        found_auth_cookies = []
+        for cookie in key_cookies:
+            if f'{cookie}=' in cookie_header:
+                found_auth_cookies.append(cookie)
+
+        print(f"  🔍 Debug: Found auth cookies: {found_auth_cookies}")
 
         # Quick test API call
         headers = {
@@ -234,6 +246,7 @@ def _test_current_cookies(cookie_db_path: str) -> bool:
             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
         }
 
+        print(f"  🔍 Debug: Testing API call to /B2C/user...")
         response = requests.get(
             'https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user',
             params={'salesChannel': 'selfService'},
@@ -241,14 +254,24 @@ def _test_current_cookies(cookie_db_path: str) -> bool:
             timeout=10
         )
 
+        print(f"  🔍 Debug: API response status: {response.status_code}")
+
         if response.status_code == 200:
             data = response.json()
+            user_id = data.get('userId', 'Unknown')
+            is_anonymous = data.get('isAnonymous', True)
+            print(f"  🔍 Debug: User ID: {user_id}, Anonymous: {is_anonymous}")
+
             # Check if we get an authenticated user (not Anonymous)
-            return not data.get('isAnonymous', True)
+            is_valid = not is_anonymous
+            print(f"  🔍 Debug: Cookies valid: {is_valid}")
+            return is_valid
+        else:
+            print(f"  🔍 Debug: API call failed with status {response.status_code}")
+            return False
 
-        return False
-
-    except Exception:
+    except Exception as e:
+        print(f"  🔍 Debug: Exception during cookie test: {e}")
         return False
 
 
@@ -278,22 +301,35 @@ def _wait_for_authentication(cookie_db_path: str, timeout: int = 300) -> bool:
     import time
 
     start_time = time.time()
-    check_interval = 5  # Check every 5 seconds
+    check_interval = 1  # Check every 1 second for responsive monitoring
+    last_check_time = 0
 
     print(f"⏱️  Monitoring for authentication (timeout: {timeout//60} minutes)...")
+    print("💡 Please log in to Three Mobile in the browser that opened")
+    print("🔄 Checking cookies every second for authentication completion...")
+    print()
 
     while time.time() - start_time < timeout:
-        # Test current cookies
-        if _test_current_cookies(cookie_db_path):
-            return True
+        current_time = time.time()
+        elapsed = int(current_time - start_time)
 
-        # Show progress
-        elapsed = int(time.time() - start_time)
-        print(f"⏳ Waiting... ({elapsed}s elapsed)", end='\r')
+        # Only test cookies every second to avoid spam
+        if current_time - last_check_time >= check_interval:
+            print(f"⏳ [{elapsed:03d}s] Testing cookies...", end='', flush=True)
 
-        time.sleep(check_interval)
+            # Test current cookies with detailed output
+            if _test_current_cookies(cookie_db_path):
+                print(" ✅ AUTHENTICATED!")
+                print("🎉 Fresh authentication detected! Continuing...")
+                return True
+            else:
+                print(" ❌ Still waiting for login...")
 
-    print()  # New line after progress
+            last_check_time = current_time
+
+        time.sleep(0.1)  # Small sleep to prevent CPU spinning
+
+    print(f"\n❌ Timeout after {timeout}s - authentication not detected")
     return False
 
 

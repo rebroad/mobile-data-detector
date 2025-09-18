@@ -309,8 +309,17 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
 
     # 1) Hit account to establish cookies
     account_url = "https://www.three.co.uk/account"
-    r = session.get(account_url)
-    time.sleep(0.5)
+    try:
+        r = session.get(account_url, timeout=10)
+        print(f"✅ Connected to Three Mobile (status: {r.status_code})")
+        time.sleep(0.5)
+    except Exception as e:
+        print(f"❌ Cannot connect to Three Mobile: {e}")
+        print("This could be due to:")
+        print("  - Network connectivity issues")
+        print("  - DNS resolution problems") 
+        print("  - Firewall/proxy blocking the connection")
+        return None
 
     # Headers template
     api_headers = {
@@ -481,6 +490,20 @@ if __name__ == "__main__":
 
     # Load configuration
     cfg = load_config()
+
+    # Quick connectivity check
+    try:
+        import socket
+        socket.create_connection(("8.8.8.8", 53), timeout=3)
+        print("✅ Internet connectivity confirmed")
+    except Exception:
+        print("❌ No internet connectivity detected")
+        print("Please check your network connection and try again")
+        try:
+            os.write(3, b"-1\n")
+        except Exception:
+            pass
+        raise SystemExit(3)
 
     # Update credentials based on SSID if provided
     if ssid:

@@ -145,41 +145,73 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
 
         print("🌐 Launching headless browser to capture Three Mobile cookies...")
 
-        # Navigate to Three Mobile account page
-        print("Navigating to Three Mobile account page...")
-        r = session.get("https://www.three.co.uk/account")
-        print(f"Initial page status: {r.status_code}")
+        # Start with Three Mobile login page to trigger OAuth flow
+        print("Starting OAuth flow via Three Mobile login page...")
+        r = session.get("https://www.three.co.uk/login")
+        print(f"Login page status: {r.status_code}")
 
-        # Render JavaScript to load the login form
-        print("Rendering JavaScript to load login form...")
-        r.html.render(timeout=20)
-        print("JavaScript rendering completed")
-
-        # Debug: Check what we have after initial render
-        page_title = r.html.find('title', first=True).text if r.html.find('title', first=True) else 'No title'
-        print(f"Page title after render: {page_title}")
-
-        # Check if we're already logged in (Self Service page)
-        if "Self Service" in page_title or "account" in r.url:
-            print("✅ Already logged in! Skipping login process...")
+        # Check if we get redirected (already logged in)
+        if "customer-logged" in r.url or "account" in r.url:
+            print("✅ Already authenticated! OAuth tokens should be available...")
+            # Make sure we hit the account page to get all cookies
+            if "account" not in r.url:
+                print("📄 Navigating to account page...")
+                r = session.get("https://www.three.co.uk/account")
         else:
-            # Need to log in
-            print("🔐 Attempting to log in to get authentication cookies...")
+            # Render JavaScript to handle OAuth redirects
+            print("Rendering JavaScript to handle OAuth redirects...")
+            r.html.render(timeout=30)
+            print("JavaScript rendering completed")
 
-            # Get credentials from config
-            username = config.get('three_username')
-            password = config.get('three_password')
+            current_url = r.html.url
+            print(f"Current URL after render: {current_url}")
 
-            if not username or not password:
-                print("❌ Three Mobile credentials not configured")
-                print("Please add your Three Mobile login credentials to the config file:")
-                print("THREE_USERNAME=your_email@example.com")
-                print("THREE_PASSWORD=your_password")
+            # Check if we're on Auth0 login page
+            if "auth.three.co.uk" in current_url:
+                print("🔐 Redirected to Auth0 login - need credentials...")
+
+                # Get credentials from config
+                username = config.get('three_username')
+                password = config.get('three_password')
+
+                if not username or not password:
+                    print("❌ Three Mobile credentials not configured")
+                    print("Please add your Three Mobile login credentials to the config file:")
+                    print("THREE_USERNAME=your_email@example.com")
+                    print("THREE_PASSWORD=your_password")
+                    return None
+
+                # Submit Auth0 login form using JavaScript
+                print("📝 Submitting Auth0 login with credentials...")
+                try:
+                    r.html.render(script=f"""
+                        // Fill Auth0 login form
+                        const usernameField = document.querySelector('input[name="username"]') ||
+                                            document.querySelector('input[type="email"]') ||
+                                            document.querySelector('#username');
+                        const passwordField = document.querySelector('input[name="password"]') ||
+                                            document.querySelector('input[type="password"]') ||
+                                            document.querySelector('#password');
+                        const submitButton = document.querySelector('button[type="submit"]') ||
+                                           document.querySelector('input[type="submit"]');
+
+                        if (usernameField && passwordField && submitButton) {{
+                            usernameField.value = '{username}';
+                            passwordField.value = '{password}';
+                            submitButton.click();
+                        }}
+                    """, timeout=30)
+
+                    # Wait for OAuth redirect to complete
+                    time.sleep(5)
+                    print("✅ Auth0 login submitted, checking for OAuth completion...")
+
+                except Exception as login_error:
+                    print(f"❌ Auth0 login failed: {login_error}")
+                    return None
+            else:
+                print(f"❌ Expected Auth0 redirect but got: {current_url}")
                 return None
-
-            # Look for login form and submit
-            # [Login form logic would go here - simplified for this version]
-            print("Login form submission logic would be implemented here")
 
         # Navigate to account page to ensure we have all cookies
         print("📄 Navigating to account page...")
@@ -317,7 +349,7 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
         print(f"❌ Cannot connect to Three Mobile: {e}")
         print("This could be due to:")
         print("  - Network connectivity issues")
-        print("  - DNS resolution problems") 
+        print("  - DNS resolution problems")
         print("  - Firewall/proxy blocking the connection")
         return None
 

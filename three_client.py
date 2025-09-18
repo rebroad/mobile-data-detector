@@ -223,16 +223,15 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
             print("📝 Submitting Auth0 login with credentials...")
             try:
                 r.html.render(script=f"""
-                    // Improved form filling with proper event handling
-                    const usernameField = document.querySelector('input[name="username"]');
-                    const passwordField = document.querySelector('input[name="password"]');
-                    const submitButton = document.querySelector('button[type="submit"]');
+                    // Compatible form filling with older JavaScript syntax
+                    var usernameField = document.querySelector('input[name="username"]');
+                    var passwordField = document.querySelector('input[name="password"]');
+                    var submitButton = document.querySelector('button[type="submit"]');
 
-                    console.log('Form elements found:', {{
-                        username: usernameField ? 'YES' : 'NO',
-                        password: passwordField ? 'YES' : 'NO',
-                        submit: submitButton ? 'YES' : 'NO'
-                    }});
+                    console.log('Form elements found');
+                    console.log('Username field: ' + (usernameField ? 'YES' : 'NO'));
+                    console.log('Password field: ' + (passwordField ? 'YES' : 'NO'));
+                    console.log('Submit button: ' + (submitButton ? 'YES' : 'NO'));
 
                     if (usernameField && passwordField && submitButton) {{
                         console.log('Filling form fields with proper events...');
@@ -240,21 +239,36 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
                         // Fill username field with proper events
                         usernameField.focus();
                         usernameField.value = '{username}';
-                        usernameField.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        usernameField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+
+                        // Create and dispatch input event
+                        var inputEvent = document.createEvent('Event');
+                        inputEvent.initEvent('input', true, true);
+                        usernameField.dispatchEvent(inputEvent);
+
+                        // Create and dispatch change event
+                        var changeEvent = document.createEvent('Event');
+                        changeEvent.initEvent('change', true, true);
+                        usernameField.dispatchEvent(changeEvent);
+
                         usernameField.blur();
 
-                        // Wait a bit
-                        setTimeout(() => {{
-                            // Fill password field with proper events
+                        // Wait a bit then fill password
+                        setTimeout(function() {{
                             passwordField.focus();
                             passwordField.value = '{password}';
-                            passwordField.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                            passwordField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+
+                            var inputEvent2 = document.createEvent('Event');
+                            inputEvent2.initEvent('input', true, true);
+                            passwordField.dispatchEvent(inputEvent2);
+
+                            var changeEvent2 = document.createEvent('Event');
+                            changeEvent2.initEvent('change', true, true);
+                            passwordField.dispatchEvent(changeEvent2);
+
                             passwordField.blur();
 
                             // Wait a bit more then submit
-                            setTimeout(() => {{
+                            setTimeout(function() {{
                                 console.log('Form filled, submitting...');
                                 submitButton.click();
                                 console.log('Submit clicked!');

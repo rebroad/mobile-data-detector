@@ -1,0 +1,29 @@
+cd /home/rebroad/src/mobile-data-detector && python3 -c "
+import json
+# Load the HAR file
+with open('/home/rebroad/Downloads/www.three.co.uk.har', 'r') as f:
+    har_data = json.load(f)
+# Find the allowance API call
+for req in har_data['log']['entries']:
+    url = req['request']['url']
+    if 'unbilled-usage-accumulators' in url:
+        print('Allowance API call:')
+        print(f'URL: {url}')
+        print('Headers:')
+        headers = req['request']['headers']
+        for header in headers:
+            if header['name'].lower() in ['cookie', 'referer', 'user-agent']:
+                print(f'  {header[\"name\"]}: {header[\"value\"][:100]}...')
+        print('\\nResponse:')
+        response = req['response']
+        print(f'Status: {response[\"status\"]}')
+        if 'content' in response and 'text' in response['content']:
+            try:
+                data = json.loads(response['content']['text'])
+                print('Response data:')
+                print(json.dumps(data, indent=2)[:1000] + '...')
+            except:
+                print('Response text (first 500 chars):')
+                print(response['content']['text'][:500])
+        break
+"

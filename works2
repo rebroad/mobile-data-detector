@@ -1,0 +1,20 @@
+python3 -c "
+import json
+with open('/home/rebroad/Downloads/www.three.co.uk.har', 'r') as f:
+    har = json.load(f)
+
+# Find the sequence of API calls leading to allowance
+api_calls = []
+for entry in har['log']['entries']:
+    url = entry['request']['url']
+    if 'rp-server-b2c' in url and entry['response']['status'] == 200:
+        api_calls.append({
+            'url': url.split('?')[0].split('/')[-2:],  # last 2 parts
+            'status': entry['response']['status'],
+            'method': entry['request']['method']
+        })
+
+print('=== API CALL SEQUENCE ===')
+for i, call in enumerate(api_calls[-10:], 1):  # Last 10 calls
+    print(f'{i}. {call[\"method\"]} /{call[\"url\"][-2]}/{call[\"url\"][-1]} -> {call[\"status\"]}')
+"

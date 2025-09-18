@@ -314,48 +314,59 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
 
     session = HTMLSession()
 
-    # Check if we have credentials configured - if so, use headless browser for fresh cookies
-    has_credentials = config.get('three_username') and config.get('three_password')
+    # Step 1: Always try existing database cookies first (if SSID provided)
     used_fresh_login = False
-
-    if has_credentials:
-        print("Credentials configured - attempting fresh login via headless browser...")
-        # Pass SSID to the cookie function
-        config['_current_ssid'] = ssid
-        result = get_live_three_cookies(config)
-        if result:
-            cookie_header, uxf_token = result
-            print("✅ Got fresh cookies from headless browser login")
-            # Set cookies in main session
-            for cookie_str in cookie_header.split('; '):
-                if '=' in cookie_str:
-                    name, value = cookie_str.split('=', 1)
-                    session.cookies.set(name, value, domain='.three.co.uk')
-
-            # Store UXF token if available
-            if uxf_token:
-                session._cached_uxf_token = uxf_token
-                print(f"✅ Transferred UXF token from headless session")
-
-            used_fresh_login = True
-        else:
-            print("❌ Headless browser login failed, falling back to database cookies...")
-
-    # Fallback: try to get cookies from database if SSID is provided and we haven't used fresh login
-    if not used_fresh_login and ssid:
+    if ssid:
         cookie_db_path = resolve_cookie_db_for_ssid(ssid, config)
         if cookie_db_path:
             print(f"Using cookie database for SSID {ssid}: {cookie_db_path}")
             cookie_header = load_cookie_header_via_helper(cookie_db_path)
             if cookie_header:
                 print("✅ Loaded cookies from database")
-                # Set cookies in session
-                for cookie_str in cookie_header.split('; '):
-                    if '=' in cookie_str:
-                        name, value = cookie_str.split('=', 1)
-                        session.cookies.set(name, value, domain='.three.co.uk')
+                # Test if these cookies are still valid
+                print("🔍 Testing if current cookies are valid...")
+                if _test_current_cookies(cookie_db_path):
+                    print("✅ Current cookies are valid - proceeding with existing authentication")
+                    # Set cookies in session
+                    for cookie_str in cookie_header.split('; '):
+                        if '=' in cookie_str:
+                            name, value = cookie_str.split('=', 1)
+                            session.cookies.set(name, value, domain='.three.co.uk')
+                else:
+                    print("❌ Current cookies are stale - need fresh authentication")
+                    # Launch browser for manual refresh
+                    has_credentials = config.get('three_username') and config.get('three_password')
+                    if has_credentials:
+                        print("🔄 Launching browser for manual authentication refresh...")
+                        config['_current_ssid'] = ssid
+                        result = get_live_three_cookies(config)
+                        if result:
+                            cookie_header, uxf_token = result
+                            print("✅ Got fresh cookies from browser login")
+                            # Set fresh cookies in session
+                            for cookie_str in cookie_header.split('; '):
+                                if '=' in cookie_str:
+                                    name, value = cookie_str.split('=', 1)
+                                    session.cookies.set(name, value, domain='.three.co.uk')
+                            used_fresh_login = True
+                        else:
+                            # Browser authentication failed, but load old cookies anyway
+                            print("⚠️ Browser authentication failed, using existing cookies...")
+                            for cookie_str in cookie_header.split('; '):
+                                if '=' in cookie_str:
+                                    name, value = cookie_str.split('=', 1)
+                                    session.cookies.set(name, value, domain='.three.co.uk')
+                    else:
+                        print("⚠️ No credentials configured, using existing cookies...")
+                        # Use existing cookies even if stale
+                        for cookie_str in cookie_header.split('; '):
+                            if '=' in cookie_str:
+                                name, value = cookie_str.split('=', 1)
+                                session.cookies.set(name, value, domain='.three.co.uk')
+            else:
+                print("❌ No cookies found in database")
 
-    # 1) Hit account to establish cookies
+    # 2) Hit account to establish cookies
     account_url = "https://www.three.co.uk/account"
     try:
         r = session.get(account_url, timeout=10)

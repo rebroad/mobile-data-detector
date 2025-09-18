@@ -369,13 +369,15 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
     customer_id: Optional[str] = None
     try:
         ud = ur.json()
+        print(f"User API response: {ud}")  # Debug what we're getting
         for key in ('customerId', 'partyId', 'id'):
             val = ud.get(key)
             if isinstance(val, (str, int)) and str(val).isdigit():
                 customer_id = str(val)
+                print(f"✓ Found customer ID '{customer_id}' from key '{key}'")
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error parsing user API response: {e}")
 
     # 3) shoppingCart → subscriptionId (and maybe customerId)
     shopping_url = 'https://www.three.co.uk/rp-server-b2c/commerce/v1/shoppingCart'

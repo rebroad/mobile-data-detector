@@ -223,15 +223,10 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
             print("📝 Submitting Auth0 login with credentials...")
             try:
                 r.html.render(script=f"""
-                    // Debug: Check what form fields are available
-                    const usernameField = document.querySelector('input[name="username"]') ||
-                                        document.querySelector('input[type="email"]') ||
-                                        document.querySelector('#username');
-                    const passwordField = document.querySelector('input[name="password"]') ||
-                                        document.querySelector('input[type="password"]') ||
-                                        document.querySelector('#password');
-                    const submitButton = document.querySelector('button[type="submit"]') ||
-                                       document.querySelector('input[type="submit"]');
+                    // Improved form filling with proper event handling
+                    const usernameField = document.querySelector('input[name="username"]');
+                    const passwordField = document.querySelector('input[name="password"]');
+                    const submitButton = document.querySelector('button[type="submit"]');
 
                     console.log('Form elements found:', {{
                         username: usernameField ? 'YES' : 'NO',
@@ -240,12 +235,31 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
                     }});
 
                     if (usernameField && passwordField && submitButton) {{
-                        console.log('Filling form fields...');
+                        console.log('Filling form fields with proper events...');
+
+                        // Fill username field with proper events
+                        usernameField.focus();
                         usernameField.value = '{username}';
-                        passwordField.value = '{password}';
-                        console.log('Clicking submit button...');
-                        submitButton.click();
-                        console.log('Submit clicked!');
+                        usernameField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        usernameField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        usernameField.blur();
+
+                        // Wait a bit
+                        setTimeout(() => {{
+                            // Fill password field with proper events
+                            passwordField.focus();
+                            passwordField.value = '{password}';
+                            passwordField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            passwordField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                            passwordField.blur();
+
+                            // Wait a bit more then submit
+                            setTimeout(() => {{
+                                console.log('Form filled, submitting...');
+                                submitButton.click();
+                                console.log('Submit clicked!');
+                            }}, 500);
+                        }}, 500);
                     }} else {{
                         console.log('ERROR: Could not find all required form fields');
                     }}

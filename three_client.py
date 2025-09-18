@@ -360,10 +360,11 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
         else:
             return None
 
-    # Capture token from headers
+    # Capture fresh token from headers (this is the important part!)
     uxf = ur.headers.get('uxfauthorization')
     if uxf:
         api_headers['uxfauthorization'] = uxf
+        print(f"✅ Got fresh UXF token from user API response: {uxf[:100]}...")
 
     customer_id: Optional[str] = None
     try:
@@ -381,6 +382,11 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
     cr = session.get(shopping_url, params={'salesChannel': 'selfService'}, headers=api_headers)
     if cr.status_code != 200:
         print(f"shoppingCart failed: {cr.status_code}")
+        print(f"Response headers: {dict(cr.headers)}")
+        try:
+            print(f"Response body: {cr.text[:500]}")
+        except:
+            pass
         return None
 
     subscription_id: Optional[str] = None

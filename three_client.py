@@ -217,13 +217,97 @@ def _get_browser_command_for_profile(cookie_db_path: str) -> tuple[Optional[str]
     return (None, None)
 
 
+def _get_live_cookies_via_chrome_debugging() -> Optional[str]:
+    """Get live cookies from running Chrome using Remote Debugging Protocol"""
+    try:
+        import requests
+        import json
+
+        # Common Chrome debugging ports
+        debug_ports = [9222, 9223, 9224]
+
+        for port in debug_ports:
+            try:
+                # Get list of tabs
+                tabs_response = requests.get(f'http://localhost:{port}/json', timeout=2)
+                if tabs_response.status_code != 200:
+                    continue
+
+                tabs = tabs_response.json()
+
+                # Find a tab with three.co.uk
+                three_tab = None
+                for tab in tabs:
+                    if 'three.co.uk' in tab.get('url', ''):
+                        three_tab = tab
+                        break
+
+                if not three_tab:
+                    print(f"  🔍 Debug: No Three Mobile tab found on port {port}")
+                    continue
+
+                # Connect to the tab via WebSocket debugging
+                import websocket
+                ws_url = three_tab['webSocketDebuggerUrl']
+
+                print(f"  🔍 Debug: Connecting to Chrome tab: {three_tab['title'][:50]}...")
+
+                # Use synchronous websocket for simplicity
+                ws = websocket.create_connection(ws_url, timeout=5)
+
+                # Enable Runtime domain
+                ws.send(json.dumps({"id": 1, "method": "Runtime.enable"}))
+                ws.recv()
+
+                # Get cookies for three.co.uk domain
+                ws.send(json.dumps({
+                    "id": 2,
+                    "method": "Runtime.evaluate",
+                    "params": {
+                        "expression": "document.cookie"
+                    }
+                }))
+
+                response = ws.recv()
+                result = json.loads(response)
+
+                ws.close()
+
+                if result.get('result', {}).get('result', {}).get('value'):
+                    cookie_string = result['result']['result']['value']
+                    print(f"  🔍 Debug: Retrieved {len(cookie_string.split(';'))} live cookies from Chrome")
+                    return cookie_string
+
+            except Exception as e:
+                print(f"  🔍 Debug: Chrome debugging port {port} failed: {e}")
+                continue
+
+        print("  🔍 Debug: Chrome Remote Debugging not available")
+        return None
+
+    except ImportError:
+        print("  🔍 Debug: websocket-client not available for Chrome debugging")
+        return None
+    except Exception as e:
+        print(f"  🔍 Debug: Chrome debugging failed: {e}")
+        return None
+
+
 def _test_current_cookies(cookie_db_path: str) -> bool:
     """Test if current cookies are valid by making a quick API call"""
     try:
         import requests
 
-        # Load current cookies
-        cookie_header = load_cookie_header_via_helper(cookie_db_path)
+        # First try Chrome Remote Debugging to get live cookies
+        live_cookies = _get_live_cookies_via_chrome_debugging()
+        if live_cookies:
+            print("  🔍 Debug: Using live cookies from Chrome Remote Debugging")
+            cookie_header = live_cookies
+        else:
+            # Fallback to database cookies
+            print("  🔍 Debug: Falling back to database cookies")
+            cookie_header = load_cookie_header_via_helper(cookie_db_path)
+
         if not cookie_header:
             print("  🔍 Debug: No cookies found in database")
             return False

@@ -278,10 +278,43 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
                     if username_field:
                         print("⚠️ Login form still present - login likely failed")
                         print("  Possible causes:")
-                        print("  1. Incorrect username/password")
-                        print("  2. Account locked/suspended")
+                        print("  1. JavaScript form filling failed")
+                        print("  2. SMS/2FA verification required")
                         print("  3. Captcha required")
-                        print("  4. Two-factor authentication required")
+                        print("  4. Incorrect username/password")
+                        print("  5. Account locked/suspended")
+
+                        # Capture the full page HTML to see what's happening
+                        print("\n🔍 Capturing full page HTML for analysis...")
+                        page_html = r.html.html
+
+                        # Save HTML to file for debugging
+                        with open('/tmp/auth0_debug.html', 'w', encoding='utf-8') as f:
+                            f.write(page_html)
+                        print("📄 Full HTML saved to /tmp/auth0_debug.html")
+
+                        # Look for specific patterns that might indicate 2FA/SMS
+                        sms_indicators = [
+                            'verification code', 'sms', 'text message', 'phone',
+                            'verify', 'code', 'otp', 'two-factor', '2fa',
+                            'mobile number', 'authentication'
+                        ]
+
+                        page_text = r.html.text.lower()
+                        found_indicators = [indicator for indicator in sms_indicators if indicator in page_text]
+
+                        if found_indicators:
+                            print(f"🚨 Possible 2FA/SMS indicators found: {', '.join(found_indicators)}")
+                            print("   This suggests SMS or 2FA verification may be required")
+
+                        # Check the current form values to see if our JavaScript worked
+                        username_value = username_field.attrs.get('value', '')
+                        password_field = r.html.find('input[name="password"]', first=True)
+                        password_value = password_field.attrs.get('value', '') if password_field else ''
+
+                        print(f"🔍 Form field values after filling:")
+                        print(f"   Username field value: '{username_value}'")
+                        print(f"   Password field value: {'*' * len(password_value) if password_value else '(empty)'}")
 
             except Exception as login_error:
                 print(f"❌ Auth0 login failed: {login_error}")

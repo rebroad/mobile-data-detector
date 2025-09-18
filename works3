@@ -1,0 +1,29 @@
+python3 -c "
+import json
+with open('/home/rebroad/Downloads/www.three.co.uk.har', 'r') as f:
+    har = json.load(f)
+
+print('=== FINDING THE OAUTH START POINT ===')
+
+# Look for the very first requests to see how OAuth was initiated
+entries = har['log']['entries']
+oauth_sequence = []
+
+for i, entry in enumerate(entries[:20]):  # First 20 requests
+    url = entry['request']['url']
+    method = entry['request']['method']
+    status = entry['response']['status']
+    
+    if 'three.co.uk' in url or 'auth.three.co.uk' in url:
+        oauth_sequence.append((i, method, url, status))
+
+print('First 20 Three Mobile related requests:')
+for i, method, url, status in oauth_sequence:
+    print(f'{i}: {method} {url} -> {status}')
+    
+    # Show redirects
+    if status in [301, 302, 303, 307, 308]:
+        for h in entries[i]['response']['headers']:
+            if h['name'].lower() == 'location':
+                print(f'   -> Redirects to: {h[\"value\"]}')
+"

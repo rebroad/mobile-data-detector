@@ -379,7 +379,12 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
 
     # 3) shoppingCart → subscriptionId (and maybe customerId)
     shopping_url = 'https://www.three.co.uk/rp-server-b2c/commerce/v1/shoppingCart'
-    cr = session.get(shopping_url, params={'salesChannel': 'selfService'}, headers=api_headers)
+    # Need to include customer ID filter based on HAR file analysis
+    shopping_params = {
+        'salesChannel': 'selfService',
+        'filters': f'customer.id=={customer_id}' if customer_id else 'customer.id==125848818'  # fallback
+    }
+    cr = session.get(shopping_url, params=shopping_params, headers=api_headers)
     if cr.status_code != 200:
         print(f"shoppingCart failed: {cr.status_code}")
         print(f"Response headers: {dict(cr.headers)}")

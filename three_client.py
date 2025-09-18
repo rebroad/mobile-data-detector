@@ -219,6 +219,16 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
                 time.sleep(5)
                 print("✅ Auth0 login submitted, checking for OAuth completion...")
 
+                # Debug: Check where we ended up after login
+                final_url = r.html.url
+                print(f"🔍 Final URL after Auth0 login: {final_url}")
+
+                # Check if we successfully got redirected to customer-logged with authorization code
+                if "customer-logged" in final_url and "code=" in final_url:
+                    print("🎉 OAuth authorization code received! JWT tokens should be available")
+                else:
+                    print(f"⚠️ OAuth may not have completed successfully. Expected customer-logged?code=... but got: {final_url}")
+
             except Exception as login_error:
                 print(f"❌ Auth0 login failed: {login_error}")
                 return None

@@ -125,12 +125,176 @@ def load_cookie_header_via_helper(cookie_db_path: str) -> Optional[str]:
 
 
 def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
-    """Extract existing authenticated cookies from browser database instead of automation"""
-    print("🍪 Using existing authenticated cookies from browser database...")
+    """Launch browser for user to manually refresh authentication, then detect success"""
 
-    # Skip OAuth automation - just use the existing database cookies
-    # The user already has an authenticated session in their browser
-    return None  # This will trigger fallback to database cookies
+    # Get the SSID to determine which browser profile to use
+    ssid = getattr(config, '_current_ssid', None)
+    if not ssid:
+        print("⚠️ No SSID available for determining browser profile")
+        return None
+
+    # Get the cookie database path for this SSID
+    cookie_db_path = resolve_cookie_db_for_ssid(ssid, config)
+    if not cookie_db_path:
+        print(f"⚠️ No cookie database configured for SSID: {ssid}")
+        return None
+
+    print(f"🔄 Cookie refresh needed for SSID: {ssid}")
+    print(f"📁 Using browser profile: {cookie_db_path}")
+
+    # Determine browser command and profile
+    browser_cmd, profile_arg = _get_browser_command_for_profile(cookie_db_path)
+    if not browser_cmd:
+        print("❌ Could not determine browser command")
+        return None
+
+    # Check current authentication status
+    print("🔍 Checking current authentication status...")
+    if _test_current_cookies(cookie_db_path):
+        print("✅ Current cookies are valid - no refresh needed")
+        return None  # Use existing cookies
+
+    print("🌐 Launching browser for manual login...")
+    print("👤 Please log in to Three Mobile when the browser opens")
+    print("🔄 Script will automatically detect when login completes...")
+
+    # Launch browser with Three Mobile login page
+    success = _launch_browser_for_login(browser_cmd, profile_arg)
+    if not success:
+        print("❌ Failed to launch browser")
+        return None
+
+    # Monitor cookies and wait for authentication
+    print("⏳ Waiting for authentication to complete...")
+    success = _wait_for_authentication(cookie_db_path, timeout=300)  # 5 minutes
+
+    if success:
+        print("✅ Authentication detected! Using fresh cookies...")
+        return None  # Trigger fallback to fresh database cookies
+    else:
+        print("❌ Authentication timeout or failed")
+        return None
+
+
+def _get_browser_command_for_profile(cookie_db_path: str) -> tuple[Optional[str], Optional[str]]:
+    """Determine browser command and profile argument from cookie database path"""
+    import shutil
+
+    # Determine if it's a Chromium/Chrome profile
+    if 'chromium' in cookie_db_path.lower() or 'chrome' in cookie_db_path.lower():
+        # Extract profile directory from cookie path
+        # e.g., /home/user/snap/chromium/common/chromium/Default/Cookies -> /home/user/snap/chromium/common/chromium
+        if '/Default/Cookies' in cookie_db_path:
+            user_data_dir = cookie_db_path.replace('/Default/Cookies', '')
+            profile_name = 'Default'
+        elif '/Profile ' in cookie_db_path and '/Cookies' in cookie_db_path:
+            # e.g., /path/Profile 1/Cookies -> /path, Profile 1
+            parts = cookie_db_path.replace('/Cookies', '').split('/')
+            profile_name = parts[-1]  # e.g., "Profile 1"
+            user_data_dir = '/'.join(parts[:-1])
+        else:
+            user_data_dir = cookie_db_path.replace('/Cookies', '')
+            profile_name = None
+
+        # Check for Chromium browser
+        chromium_cmd = None
+        for cmd in ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable']:
+            if shutil.which(cmd):
+                chromium_cmd = cmd
+                break
+
+        if chromium_cmd:
+            if profile_name and profile_name != 'Default':
+                return (chromium_cmd, f'--user-data-dir={user_data_dir} --profile-directory={profile_name}')
+            else:
+                return (chromium_cmd, f'--user-data-dir={user_data_dir}')
+
+    # Add support for Firefox profiles if needed
+    # elif 'firefox' in cookie_db_path.lower():
+    #     # Firefox profile handling...
+
+    return (None, None)
+
+
+def _test_current_cookies(cookie_db_path: str) -> bool:
+    """Test if current cookies are valid by making a quick API call"""
+    try:
+        import requests
+
+        # Load current cookies
+        cookie_header = load_cookie_header_via_helper(cookie_db_path)
+        if not cookie_header:
+            return False
+
+        # Quick test API call
+        headers = {
+            'Cookie': cookie_header,
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': 'https://www.three.co.uk/customer-logged',
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36'
+        }
+
+        response = requests.get(
+            'https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user',
+            params={'salesChannel': 'selfService'},
+            headers=headers,
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            # Check if we get an authenticated user (not Anonymous)
+            return not data.get('isAnonymous', True)
+
+        return False
+
+    except Exception:
+        return False
+
+
+def _launch_browser_for_login(browser_cmd: str, profile_arg: str) -> bool:
+    """Launch browser with Three Mobile login page"""
+    try:
+        import subprocess
+
+        # Three Mobile login URL
+        login_url = "https://www.three.co.uk/login"
+
+        # Build command
+        cmd = [browser_cmd, profile_arg, login_url]
+
+        # Launch browser in background
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        return True
+
+    except Exception as e:
+        print(f"Error launching browser: {e}")
+        return False
+
+
+def _wait_for_authentication(cookie_db_path: str, timeout: int = 300) -> bool:
+    """Monitor cookies and wait for successful authentication"""
+    import time
+
+    start_time = time.time()
+    check_interval = 5  # Check every 5 seconds
+
+    print(f"⏱️  Monitoring for authentication (timeout: {timeout//60} minutes)...")
+
+    while time.time() - start_time < timeout:
+        # Test current cookies
+        if _test_current_cookies(cookie_db_path):
+            return True
+
+        # Show progress
+        elapsed = int(time.time() - start_time)
+        print(f"⏳ Waiting... ({elapsed}s elapsed)", end='\r')
+
+        time.sleep(check_interval)
+
+    print()  # New line after progress
+    return False
 
 
 def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -156,6 +320,8 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
 
     if has_credentials:
         print("Credentials configured - attempting fresh login via headless browser...")
+        # Pass SSID to the cookie function
+        config['_current_ssid'] = ssid
         result = get_live_three_cookies(config)
         if result:
             cookie_header, uxf_token = result
@@ -227,6 +393,7 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
         # If we haven't tried fresh login yet, try it now
         if not used_fresh_login:
             print("Attempting to get live cookies through login...")
+            config['_current_ssid'] = ssid
             result = get_live_three_cookies(config)
             if result:
                 cookie_header, uxf_token = result

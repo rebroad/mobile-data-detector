@@ -238,6 +238,27 @@ def _test_current_cookies(cookie_db_path: str) -> bool:
 
         print(f"  🔍 Debug: Found auth cookies: {found_auth_cookies}")
 
+        # Check cookie freshness - get modification time of cookie database
+        import os
+        try:
+            db_mtime = os.path.getmtime(cookie_db_path)
+            import time
+            current_time = time.time()
+            age_minutes = (current_time - db_mtime) / 60
+            print(f"  🔍 Debug: Cookie database last modified {age_minutes:.1f} minutes ago")
+        except Exception as e:
+            print(f"  🔍 Debug: Could not check cookie database age: {e}")
+
+        # Show a sample of key cookies with their values (truncated)
+        key_cookie_values = {}
+        for cookie in key_cookies:
+            for cookie_part in cookie_header.split(';'):
+                if cookie_part.strip().startswith(f'{cookie}='):
+                    value = cookie_part.split('=', 1)[1].strip()
+                    key_cookie_values[cookie] = value[:20] + '...' if len(value) > 20 else value
+                    break
+        print(f"  🔍 Debug: Key cookie values: {key_cookie_values}")
+
         # Quick test API call
         headers = {
             'Cookie': cookie_header,
@@ -255,6 +276,22 @@ def _test_current_cookies(cookie_db_path: str) -> bool:
         )
 
         print(f"  🔍 Debug: API response status: {response.status_code}")
+
+        # Also test account page access
+        print(f"  🔍 Debug: Testing account page access...")
+        try:
+            account_response = requests.get(
+                'https://www.three.co.uk/account',
+                headers=headers,
+                timeout=10,
+                allow_redirects=False
+            )
+            print(f"  🔍 Debug: Account page status: {account_response.status_code}")
+            if account_response.status_code in [301, 302, 303, 307, 308]:
+                redirect_location = account_response.headers.get('Location', 'No location header')
+                print(f"  🔍 Debug: Account page redirects to: {redirect_location}")
+        except Exception as e:
+            print(f"  🔍 Debug: Account page test failed: {e}")
 
         if response.status_code == 200:
             data = response.json()

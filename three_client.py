@@ -148,12 +148,12 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
 
         print("🌐 Launching headless browser with clean session...")
 
-        # Start with Three Mobile login page to trigger OAuth flow
-        print("Starting fresh OAuth flow (no existing cookies)...")
-        r = session.get("https://www.three.co.uk/login")
-        print(f"Login page status: {r.status_code}")
+        # Force OAuth by accessing a protected endpoint that requires authentication
+        print("Triggering OAuth by accessing protected endpoint...")
+        r = session.get("https://www.three.co.uk/account/usage")
+        print(f"Protected endpoint status: {r.status_code}")
 
-        # Force JavaScript rendering to trigger OAuth flow
+        # Force JavaScript rendering to handle OAuth redirects
         print("Rendering JavaScript to handle OAuth redirects...")
         r.html.render(timeout=30)
         print("JavaScript rendering completed")
@@ -161,18 +161,7 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
         current_url = r.html.url
         print(f"Current URL after render: {current_url}")
 
-        # Check where we ended up
-        if "customer-logged" in current_url:
-            print("✅ OAuth flow completed! JWT tokens should be available...")
-        elif "account" in current_url:
-            print("⚠️ Redirected to account (cookie auth) - need OAuth JWT tokens...")
-            print("🔄 Attempting to trigger OAuth by accessing protected endpoint...")
-            # Try to trigger OAuth by accessing a protected endpoint
-            protected_response = session.get("https://www.three.co.uk/account/my-account/usage")
-            protected_response.html.render(timeout=30)
-            print(f"Protected endpoint response: {protected_response.status_code}, URL: {protected_response.html.url}")
-
-        # Check if we need to handle Auth0 login page (after rendering)
+        # Check if we're on Auth0 login page (this is what we want!)
         if "auth.three.co.uk" in current_url:
             print("🔐 Redirected to Auth0 login - need credentials...")
 

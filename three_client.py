@@ -128,7 +128,7 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
     """Launch browser for user to manually refresh authentication, then detect success"""
 
     # Get the SSID to determine which browser profile to use
-    ssid = getattr(config, '_current_ssid', None)
+    ssid = config.get('_current_ssid')
     if not ssid:
         print("⚠️ No SSID available for determining browser profile")
         return None

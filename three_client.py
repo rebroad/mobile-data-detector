@@ -183,6 +183,31 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
         if "auth.three.co.uk" in current_url and "login" in current_url:
             print("🔐 Redirected to Auth0 login - need credentials...")
 
+            # Debug: Examine the Auth0 login page structure
+            print("🔍 Analyzing Auth0 login page structure...")
+            page_html = r.html.html
+
+            # Look for form elements
+            forms = r.html.find('form')
+            print(f"Found {len(forms)} form(s) on the page")
+
+            # Look for input fields
+            inputs = r.html.find('input')
+            print(f"Found {len(inputs)} input field(s):")
+            for i, inp in enumerate(inputs[:10]):  # Show first 10
+                input_type = inp.attrs.get('type', 'text')
+                input_name = inp.attrs.get('name', 'no-name')
+                input_id = inp.attrs.get('id', 'no-id')
+                print(f"  Input {i}: type='{input_type}' name='{input_name}' id='{input_id}'")
+
+            # Look for buttons
+            buttons = r.html.find('button')
+            print(f"Found {len(buttons)} button(s):")
+            for i, btn in enumerate(buttons[:5]):  # Show first 5
+                btn_type = btn.attrs.get('type', 'button')
+                btn_text = btn.text.strip()[:50] if btn.text else 'no-text'
+                print(f"  Button {i}: type='{btn_type}' text='{btn_text}'")
+
             # Get credentials from config
             username = config.get('three_username')
             password = config.get('three_password')

@@ -198,7 +198,7 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
             print("📝 Submitting Auth0 login with credentials...")
             try:
                 r.html.render(script=f"""
-                    // Fill Auth0 login form
+                    // Debug: Check what form fields are available
                     const usernameField = document.querySelector('input[name="username"]') ||
                                         document.querySelector('input[type="email"]') ||
                                         document.querySelector('#username');
@@ -208,10 +208,21 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
                     const submitButton = document.querySelector('button[type="submit"]') ||
                                        document.querySelector('input[type="submit"]');
 
+                    console.log('Form elements found:', {{
+                        username: usernameField ? 'YES' : 'NO',
+                        password: passwordField ? 'YES' : 'NO',
+                        submit: submitButton ? 'YES' : 'NO'
+                    }});
+
                     if (usernameField && passwordField && submitButton) {{
+                        console.log('Filling form fields...');
                         usernameField.value = '{username}';
                         passwordField.value = '{password}';
+                        console.log('Clicking submit button...');
                         submitButton.click();
+                        console.log('Submit clicked!');
+                    }} else {{
+                        console.log('ERROR: Could not find all required form fields');
                     }}
                 """, timeout=30)
 

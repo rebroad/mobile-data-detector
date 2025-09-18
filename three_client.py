@@ -150,67 +150,67 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
         r = session.get("https://www.three.co.uk/login")
         print(f"Login page status: {r.status_code}")
 
-        # Check if we get redirected (already logged in)
-        if "customer-logged" in r.url or "account" in r.url:
-            print("✅ Already authenticated! OAuth tokens should be available...")
-            # Make sure we hit the account page to get all cookies
-            if "account" not in r.url:
-                print("📄 Navigating to account page...")
-                r = session.get("https://www.three.co.uk/account")
-        else:
-            # Render JavaScript to handle OAuth redirects
-            print("Rendering JavaScript to handle OAuth redirects...")
-            r.html.render(timeout=30)
-            print("JavaScript rendering completed")
+        # Force JavaScript rendering to trigger OAuth flow
+        print("Rendering JavaScript to handle OAuth redirects...")
+        r.html.render(timeout=30)
+        print("JavaScript rendering completed")
 
-            current_url = r.html.url
-            print(f"Current URL after render: {current_url}")
+        current_url = r.html.url
+        print(f"Current URL after render: {current_url}")
 
-            # Check if we're on Auth0 login page
-            if "auth.three.co.uk" in current_url:
-                print("🔐 Redirected to Auth0 login - need credentials...")
+        # Check where we ended up
+        if "customer-logged" in current_url:
+            print("✅ OAuth flow completed! JWT tokens should be available...")
+        elif "account" in current_url:
+            print("⚠️ Redirected to account (cookie auth) - need OAuth JWT tokens...")
+            print("🔄 Attempting to trigger OAuth by accessing protected endpoint...")
+            # Try to trigger OAuth by accessing a protected endpoint
+            protected_response = session.get("https://www.three.co.uk/account/my-account/usage")
+            protected_response.html.render(timeout=30)
+            print(f"Protected endpoint response: {protected_response.status_code}, URL: {protected_response.html.url}")
 
-                # Get credentials from config
-                username = config.get('three_username')
-                password = config.get('three_password')
+        # Check if we need to handle Auth0 login page (after rendering)
+        if "auth.three.co.uk" in current_url:
+            print("🔐 Redirected to Auth0 login - need credentials...")
 
-                if not username or not password:
-                    print("❌ Three Mobile credentials not configured")
-                    print("Please add your Three Mobile login credentials to the config file:")
-                    print("THREE_USERNAME=your_email@example.com")
-                    print("THREE_PASSWORD=your_password")
-                    return None
+            # Get credentials from config
+            username = config.get('three_username')
+            password = config.get('three_password')
 
-                # Submit Auth0 login form using JavaScript
-                print("📝 Submitting Auth0 login with credentials...")
-                try:
-                    r.html.render(script=f"""
-                        // Fill Auth0 login form
-                        const usernameField = document.querySelector('input[name="username"]') ||
-                                            document.querySelector('input[type="email"]') ||
-                                            document.querySelector('#username');
-                        const passwordField = document.querySelector('input[name="password"]') ||
-                                            document.querySelector('input[type="password"]') ||
-                                            document.querySelector('#password');
-                        const submitButton = document.querySelector('button[type="submit"]') ||
-                                           document.querySelector('input[type="submit"]');
+            if not username or not password:
+                print("❌ Three Mobile credentials not configured")
+                print("Please add your Three Mobile login credentials to the config file:")
+                print("THREE_USERNAME=your_email@example.com")
+                print("THREE_PASSWORD=your_password")
+                return None
 
-                        if (usernameField && passwordField && submitButton) {{
-                            usernameField.value = '{username}';
-                            passwordField.value = '{password}';
-                            submitButton.click();
-                        }}
-                    """, timeout=30)
+            # Submit Auth0 login form using JavaScript
+            print("📝 Submitting Auth0 login with credentials...")
+            try:
+                r.html.render(script=f"""
+                    // Fill Auth0 login form
+                    const usernameField = document.querySelector('input[name="username"]') ||
+                                        document.querySelector('input[type="email"]') ||
+                                        document.querySelector('#username');
+                    const passwordField = document.querySelector('input[name="password"]') ||
+                                        document.querySelector('input[type="password"]') ||
+                                        document.querySelector('#password');
+                    const submitButton = document.querySelector('button[type="submit"]') ||
+                                       document.querySelector('input[type="submit"]');
 
-                    # Wait for OAuth redirect to complete
-                    time.sleep(5)
-                    print("✅ Auth0 login submitted, checking for OAuth completion...")
+                    if (usernameField && passwordField && submitButton) {{
+                        usernameField.value = '{username}';
+                        passwordField.value = '{password}';
+                        submitButton.click();
+                    }}
+                """, timeout=30)
 
-                except Exception as login_error:
-                    print(f"❌ Auth0 login failed: {login_error}")
-                    return None
-            else:
-                print(f"❌ Expected Auth0 redirect but got: {current_url}")
+                # Wait for OAuth redirect to complete
+                time.sleep(5)
+                print("✅ Auth0 login submitted, checking for OAuth completion...")
+
+            except Exception as login_error:
+                print(f"❌ Auth0 login failed: {login_error}")
                 return None
 
         # CRITICAL: Must visit /customer-logged to establish OAuth session

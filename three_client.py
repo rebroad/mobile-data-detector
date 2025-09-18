@@ -213,15 +213,36 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
                 print(f"❌ Expected Auth0 redirect but got: {current_url}")
                 return None
 
-        # Navigate to account page to ensure we have all cookies
+        # CRITICAL: Must visit /customer-logged to establish OAuth session
+        # This is where Three Mobile establishes JWT tokens in browser memory
+        print("📄 Visiting customer-logged page to establish OAuth session...")
+
+        # First, try to access customer-logged (might redirect if not authenticated)
+        customer_logged_response = session.get("https://www.three.co.uk/customer-logged")
+        print(f"Customer-logged page status: {customer_logged_response.status_code}")
+
+        # If redirected to login, we need to complete OAuth flow
+        if "login" in customer_logged_response.url or customer_logged_response.status_code != 200:
+            print("⚠️ Not authenticated - need to complete OAuth flow first")
+            # Would need actual OAuth flow implementation here
+
+        # Navigate to account page after establishing OAuth session
         print("📄 Navigating to account page...")
         r = session.get("https://www.three.co.uk/account")
 
-        # Try to make an API call to get UXF token
+        # Try to make an API call with proper referer from customer-logged
         print("Making API call to get UXF token...")
         try:
+            # Use customer-logged as referer - this is CRITICAL for authentication
+            api_headers = {
+                'Referer': 'https://www.three.co.uk/customer-logged',
+                'Accept': 'application/json, text/plain, */*',
+                'User-Agent': session.headers.get('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36')
+            }
+
             api_response = session.get("https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user",
-                                     params={'salesChannel': 'selfService'})
+                                     params={'salesChannel': 'selfService'},
+                                     headers=api_headers)
             print(f"API call status: {api_response.status_code}")
 
             # Check for UXF token in response
@@ -356,7 +377,7 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
     # Headers template
     api_headers = {
         'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.three.co.uk/account',
+        'Referer': 'https://www.three.co.uk/customer-logged',
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
         'Accept-Language': 'en-GB,en;q=0.9',
         'Origin': 'https://www.three.co.uk',

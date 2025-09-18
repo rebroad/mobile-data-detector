@@ -204,10 +204,11 @@ def _get_browser_command_for_profile(cookie_db_path: str) -> tuple[Optional[str]
                 break
 
         if chromium_cmd:
+            # Use a separate window but same profile to avoid database conflicts
             if profile_name and profile_name != 'Default':
-                return (chromium_cmd, f'--user-data-dir={user_data_dir} --profile-directory={profile_name}')
+                return (chromium_cmd, f'--user-data-dir={user_data_dir} --profile-directory={profile_name} --new-window')
             else:
-                return (chromium_cmd, f'--user-data-dir={user_data_dir}')
+                return (chromium_cmd, f'--user-data-dir={user_data_dir} --new-window')
 
     # Add support for Firefox profiles if needed
     # elif 'firefox' in cookie_db_path.lower():
@@ -248,6 +249,16 @@ def _test_current_cookies(cookie_db_path: str) -> bool:
             print(f"  🔍 Debug: Cookie database last modified {age_minutes:.1f} minutes ago")
         except Exception as e:
             print(f"  🔍 Debug: Could not check cookie database age: {e}")
+
+        # Check if Chrome is running and locking the database
+        import subprocess
+        try:
+            result = subprocess.run(['pgrep', '-f', 'chromium|chrome'],
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                print(f"  🔍 Debug: Chrome/Chromium is running (PIDs: {result.stdout.strip().replace(chr(10), ', ')}) - may cause database lock")
+        except Exception:
+            pass
 
         # Show a sample of key cookies with their values (truncated)
         key_cookie_values = {}

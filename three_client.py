@@ -38,7 +38,7 @@ def resolve_cookie_db_for_ssid(ssid: str, config: Dict) -> Optional[str]:
     mappings_str = config.get('ssid_cookie_profiles', '')
     if not mappings_str:
         return None
-    
+
     mappings = [m.strip() for m in mappings_str.split(',') if m.strip()]
     if not mappings:
         return None
@@ -88,19 +88,19 @@ def load_cookie_header_via_helper(cookie_db_path: str) -> Optional[str]:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as temp_db:
             shutil.copy2(cookie_db_path, temp_db.name)
             temp_db_path = temp_db.name
-        
+
         try:
             # Connect to the cookie database
             conn = sqlite3.connect(temp_db_path)
             cursor = conn.cursor()
-            
+
             # Query cookies for three.co.uk domain
             cursor.execute("""
                 SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly
-                FROM cookies 
+                FROM cookies
                 WHERE host_key LIKE '%three.co.uk%' OR host_key LIKE '%.three.co.uk%'
             """)
-            
+
             cookies = []
             for row in cursor.fetchall():
                 name, value, host_key, path, expires_utc, is_secure, is_httponly = row
@@ -108,17 +108,17 @@ def load_cookie_header_via_helper(cookie_db_path: str) -> Optional[str]:
                 if expires_utc and expires_utc > 0 and expires_utc < (time.time() * 1000000):
                     continue
                 cookies.append(f"{name}={value}")
-            
+
             conn.close()
             return '; '.join(cookies) if cookies else None
-            
+
         finally:
             # Clean up temp file
             try:
                 os.unlink(temp_db_path)
             except:
                 pass
-                
+
     except Exception as e:
         print(f"Error reading cookie database: {e}")
         return None
@@ -139,66 +139,66 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
         # Set up timeout handler
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(45)  # 45 second timeout
-        
+
         # Create HTML session
         session = HTMLSession()
-        
+
         print("🌐 Launching headless browser to capture Three Mobile cookies...")
-        
+
         # Navigate to Three Mobile account page
         print("Navigating to Three Mobile account page...")
         r = session.get("https://www.three.co.uk/account")
         print(f"Initial page status: {r.status_code}")
-        
+
         # Render JavaScript to load the login form
         print("Rendering JavaScript to load login form...")
         r.html.render(timeout=20)
         print("JavaScript rendering completed")
-        
+
         # Debug: Check what we have after initial render
         page_title = r.html.find('title', first=True).text if r.html.find('title', first=True) else 'No title'
         print(f"Page title after render: {page_title}")
-        
+
         # Check if we're already logged in (Self Service page)
         if "Self Service" in page_title or "account" in r.url:
             print("✅ Already logged in! Skipping login process...")
         else:
             # Need to log in
             print("🔐 Attempting to log in to get authentication cookies...")
-            
+
             # Get credentials from config
             username = config.get('three_username')
             password = config.get('three_password')
-            
+
             if not username or not password:
                 print("❌ Three Mobile credentials not configured")
                 print("Please add your Three Mobile login credentials to the config file:")
                 print("THREE_USERNAME=your_email@example.com")
                 print("THREE_PASSWORD=your_password")
                 return None
-            
+
             # Look for login form and submit
             # [Login form logic would go here - simplified for this version]
             print("Login form submission logic would be implemented here")
-        
+
         # Navigate to account page to ensure we have all cookies
         print("📄 Navigating to account page...")
         r = session.get("https://www.three.co.uk/account")
-        
+
         # Try to make an API call to get UXF token
         print("Making API call to get UXF token...")
         try:
-            api_response = session.get("https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user", 
+            api_response = session.get("https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user",
                                      params={'salesChannel': 'selfService'})
             print(f"API call status: {api_response.status_code}")
-            
+
             # Check for UXF token in response
             uxf_token = api_response.headers.get('uxfauthorization')
             if uxf_token:
                 print(f"✅ Found UXF token: {uxf_token[:100]}...")
                 # Store the token for later use
                 session._cached_uxf_token = uxf_token
-                
+
                 # Also extract WIRELESS_SECURITY_TOKEN from Set-Cookie header
                 set_cookie = api_response.headers.get('Set-Cookie', '')
                 if 'WIRELESS_SECURITY_TOKEN=' in set_cookie:
@@ -215,31 +215,31 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
 
         # Get cookies from the session
         cookies = session.cookies
-        
+
         # Filter for Three Mobile cookies
         three_cookies = []
         for cookie in cookies:
             domain = cookie.domain or ''
             if 'three.co.uk' in domain:
                 three_cookies.append(f"{cookie.name}={cookie.value}")
-        
+
         if three_cookies:
             cookie_header = '; '.join(three_cookies)
             print(f"✓ Captured {len(three_cookies)} Three Mobile cookies")
-            
+
             # Check if we got the important WIRELESS_SECURITY_TOKEN
             if 'WIRELESS_SECURITY_TOKEN=' in cookie_header and 'WIRELESS_SECURITY_TOKEN=;' not in cookie_header:
                 print("✅ Found WIRELESS_SECURITY_TOKEN in live cookies!")
             else:
                 print("⚠️  WIRELESS_SECURITY_TOKEN not found or empty in live cookies")
-            
+
             # Return cookies and UXF token
             uxf_token = getattr(session, '_cached_uxf_token', None)
             return (cookie_header, uxf_token)
         else:
             print("❌ No Three Mobile cookies found")
             return None
-            
+
     except TimeoutError as e:
         print(f"⏰ Headless browser timed out: {e}")
         return None
@@ -271,7 +271,7 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
     # Check if we have credentials configured - if so, use headless browser for fresh cookies
     has_credentials = config.get('three_username') and config.get('three_password')
     used_fresh_login = False
-    
+
     if has_credentials:
         print("Credentials configured - attempting fresh login via headless browser...")
         result = get_live_three_cookies(config)
@@ -283,16 +283,16 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
                 if '=' in cookie_str:
                     name, value = cookie_str.split('=', 1)
                     session.cookies.set(name, value, domain='.three.co.uk')
-            
+
             # Store UXF token if available
             if uxf_token:
                 session._cached_uxf_token = uxf_token
                 print(f"✅ Transferred UXF token from headless session")
-            
+
             used_fresh_login = True
         else:
             print("❌ Headless browser login failed, falling back to database cookies...")
-    
+
     # Fallback: try to get cookies from database if SSID is provided and we haven't used fresh login
     if not used_fresh_login and ssid:
         cookie_db_path = resolve_cookie_db_for_ssid(ssid, config)
@@ -321,7 +321,7 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
         'Origin': 'https://www.three.co.uk',
         'X-Requested-With': 'XMLHttpRequest',
     }
-    
+
     # Add UXF token if we got it from headless session
     cached_uxf = getattr(session, '_cached_uxf_token', None)
     if cached_uxf:
@@ -344,13 +344,13 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
                     if '=' in cookie_str:
                         name, value = cookie_str.split('=', 1)
                         session.cookies.set(name, value, domain='.three.co.uk')
-                
+
                 # Store UXF token if available
                 if uxf_token:
                     session._cached_uxf_token = uxf_token
                     api_headers['uxfauthorization'] = uxf_token
                     print(f"✅ Added UXF token to API headers")
-                
+
                 ur = session.get(user_url, params={'salesChannel': 'selfService'}, headers=api_headers)
                 if ur.status_code != 200:
                     print(f"User API still failed after login: {ur.status_code}")
@@ -380,12 +380,17 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
         print(f"Error parsing user API response: {e}")
 
     # 3) shoppingCart → subscriptionId (and maybe customerId)
+    if not customer_id:
+        print("❌ No customer ID found - cannot proceed with shoppingCart API")
+        return None
+
     shopping_url = 'https://www.three.co.uk/rp-server-b2c/commerce/v1/shoppingCart'
     # Need to include customer ID filter based on HAR file analysis
     shopping_params = {
         'salesChannel': 'selfService',
-        'filters': f'customer.id=={customer_id}' if customer_id else 'customer.id==125848818'  # fallback
+        'filters': f'customer.id=={customer_id}'
     }
+    print(f"Making shoppingCart API call with customer ID: {customer_id}")
     cr = session.get(shopping_url, params=shopping_params, headers=api_headers)
     if cr.status_code != 200:
         print(f"shoppingCart failed: {cr.status_code}")
@@ -473,14 +478,14 @@ def _accumulators_remaining_mb(data: Dict[str, Any]) -> Optional[int]:
 if __name__ == "__main__":
     # Accept SSID as optional argument
     ssid = sys.argv[1] if len(sys.argv) > 1 else None
-    
+
     # Load configuration
     cfg = load_config()
-    
+
     # Update credentials based on SSID if provided
     if ssid:
         print(f"Using SSID: {ssid}")
-        
+
     result = fetch_three_allowance_via_headless(cfg, ssid)
     if not result:
         print("Failed to fetch allowance", flush=True)
@@ -503,7 +508,7 @@ if __name__ == "__main__":
     # Log summary to stdout
     print(f"✅ Successfully fetched allowance data")
     print(f"Remaining (MB): {mb}", flush=True)
-    
+
     # Write machine-readable value to FD 3
     try:
         os.write(3, f"{mb}\n".encode())

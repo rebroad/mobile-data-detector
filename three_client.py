@@ -140,13 +140,16 @@ def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(45)  # 45 second timeout
 
-        # Create HTML session
+        # Create HTML session with completely clean cookies
         session = HTMLSession()
 
-        print("🌐 Launching headless browser to capture Three Mobile cookies...")
+        # Ensure we start with NO cookies to force OAuth flow
+        session.cookies.clear()
+
+        print("🌐 Launching headless browser with clean session...")
 
         # Start with Three Mobile login page to trigger OAuth flow
-        print("Starting OAuth flow via Three Mobile login page...")
+        print("Starting fresh OAuth flow (no existing cookies)...")
         r = session.get("https://www.three.co.uk/login")
         print(f"Login page status: {r.status_code}")
 

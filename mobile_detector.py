@@ -133,6 +133,51 @@ class MobileDetector:
                     return connection_name
         return None
 
+    def fetch_three_allowance(self) -> Optional[dict]:
+        """Fetch Three Mobile allowance data using external three_client.py script"""
+        try:
+            import subprocess, os
+            three_client_path = os.path.join(os.path.dirname(__file__), 'three_client.py')
+            # Create a pipe for FD 3
+            r_fd, w_fd = os.pipe()
+            # Build environment (pass-through)
+            env = os.environ.copy()
+            # Get current SSID to pass to external script (use test SSID if set)
+            current_ssid = getattr(self, '_test_ssid', None) or self.get_active_ssid()
+            # Spawn child with FD 3 duplicated to writer end
+            cmd = [sys.executable, three_client_path]
+            if current_ssid:
+                cmd.append(current_ssid)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                pass_fds=(w_fd,),
+                env=env
+            )
+            # Parent doesn't write
+            os.close(w_fd)
+            # Read remaining MB from r_fd
+            with os.fdopen(r_fd, 'rb', closefd=True) as rf:
+                fd3_data = rf.read().decode(errors='ignore').strip()
+            out, err = proc.communicate(timeout=120)
+            if out:
+                print(out.decode(errors='ignore'))
+            if err:
+                print(err.decode(errors='ignore'))
+            try:
+                remaining_mb = int(fd3_data)
+            except (TypeError, ValueError):
+                print("Could not parse remaining MB from three_client")
+                return None
+            # Return a minimal structure for upstream callers
+            return {
+                'remaining_mb': remaining_mb
+            }
+        except Exception as e:
+            print(f"External three_client failed: {e}")
+            return None
+
     def init_usage_tracking(self):
         """Initialize usage tracking file"""
         os.makedirs(os.path.dirname(self.usage_file), exist_ok=True)

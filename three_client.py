@@ -124,7 +124,7 @@ def load_cookie_header_via_helper(cookie_db_path: str) -> Optional[str]:
         return None
 
 
-def get_live_three_cookies(config: Dict) -> Optional[str]:
+def get_live_three_cookies(config: Dict) -> Optional[tuple[str, Optional[str]]]:
     """Use headless browser to capture live Three Mobile cookies with login"""
     try:
         from requests_html import HTMLSession
@@ -181,6 +181,38 @@ def get_live_three_cookies(config: Dict) -> Optional[str]:
             # [Login form logic would go here - simplified for this version]
             print("Login form submission logic would be implemented here")
         
+        # Navigate to account page to ensure we have all cookies
+        print("📄 Navigating to account page...")
+        r = session.get("https://www.three.co.uk/account")
+        
+        # Try to make an API call to get UXF token
+        print("Making API call to get UXF token...")
+        try:
+            api_response = session.get("https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user", 
+                                     params={'salesChannel': 'selfService'})
+            print(f"API call status: {api_response.status_code}")
+            
+            # Check for UXF token in response
+            uxf_token = api_response.headers.get('uxfauthorization')
+            if uxf_token:
+                print(f"✅ Found UXF token: {uxf_token[:100]}...")
+                # Store the token for later use
+                session._cached_uxf_token = uxf_token
+                
+                # Also extract WIRELESS_SECURITY_TOKEN from Set-Cookie header
+                set_cookie = api_response.headers.get('Set-Cookie', '')
+                if 'WIRELESS_SECURITY_TOKEN=' in set_cookie:
+                    import re
+                    token_match = re.search(r'WIRELESS_SECURITY_TOKEN=([^;]+)', set_cookie)
+                    if token_match:
+                        wireless_token = token_match.group(1)
+                        print(f"✅ Found WIRELESS_SECURITY_TOKEN: {wireless_token[:50]}...")
+                        session.cookies.set('WIRELESS_SECURITY_TOKEN', wireless_token, domain='.three.co.uk')
+            else:
+                print("⚠️  No UXF token found in API response")
+        except Exception as e:
+            print(f"API call failed: {e}")
+
         # Get cookies from the session
         cookies = session.cookies
         
@@ -194,7 +226,16 @@ def get_live_three_cookies(config: Dict) -> Optional[str]:
         if three_cookies:
             cookie_header = '; '.join(three_cookies)
             print(f"✓ Captured {len(three_cookies)} Three Mobile cookies")
-            return cookie_header
+            
+            # Check if we got the important WIRELESS_SECURITY_TOKEN
+            if 'WIRELESS_SECURITY_TOKEN=' in cookie_header and 'WIRELESS_SECURITY_TOKEN=;' not in cookie_header:
+                print("✅ Found WIRELESS_SECURITY_TOKEN in live cookies!")
+            else:
+                print("⚠️  WIRELESS_SECURITY_TOKEN not found or empty in live cookies")
+            
+            # Return cookies and UXF token
+            uxf_token = getattr(session, '_cached_uxf_token', None)
+            return (cookie_header, uxf_token)
         else:
             print("❌ No Three Mobile cookies found")
             return None
@@ -227,8 +268,33 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
 
     session = HTMLSession()
 
-    # Try to get cookies from database first if SSID is provided
-    if ssid:
+    # Check if we have credentials configured - if so, use headless browser for fresh cookies
+    has_credentials = config.get('three_username') and config.get('three_password')
+    used_fresh_login = False
+    
+    if has_credentials:
+        print("Credentials configured - attempting fresh login via headless browser...")
+        result = get_live_three_cookies(config)
+        if result:
+            cookie_header, uxf_token = result
+            print("✅ Got fresh cookies from headless browser login")
+            # Set cookies in main session
+            for cookie_str in cookie_header.split('; '):
+                if '=' in cookie_str:
+                    name, value = cookie_str.split('=', 1)
+                    session.cookies.set(name, value, domain='.three.co.uk')
+            
+            # Store UXF token if available
+            if uxf_token:
+                session._cached_uxf_token = uxf_token
+                print(f"✅ Transferred UXF token from headless session")
+            
+            used_fresh_login = True
+        else:
+            print("❌ Headless browser login failed, falling back to database cookies...")
+    
+    # Fallback: try to get cookies from database if SSID is provided and we haven't used fresh login
+    if not used_fresh_login and ssid:
         cookie_db_path = resolve_cookie_db_for_ssid(ssid, config)
         if cookie_db_path:
             print(f"Using cookie database for SSID {ssid}: {cookie_db_path}")
@@ -255,24 +321,41 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
         'Origin': 'https://www.three.co.uk',
         'X-Requested-With': 'XMLHttpRequest',
     }
+    
+    # Add UXF token if we got it from headless session
+    cached_uxf = getattr(session, '_cached_uxf_token', None)
+    if cached_uxf:
+        api_headers['uxfauthorization'] = cached_uxf
+        print(f"✅ Using cached UXF token in API headers")
 
     # 2) user → uxfauthorization + customerId
     user_url = 'https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user'
     ur = session.get(user_url, params={'salesChannel': 'selfService'}, headers=api_headers)
     if ur.status_code != 200:
         print(f"User API failed: {ur.status_code}")
-        # Try to get live cookies through login
-        print("Attempting to get live cookies through login...")
-        cookie_header = get_live_three_cookies(config)
-        if cookie_header:
-            # Set cookies in session and retry
-            for cookie_str in cookie_header.split('; '):
-                if '=' in cookie_str:
-                    name, value = cookie_str.split('=', 1)
-                    session.cookies.set(name, value, domain='.three.co.uk')
-            ur = session.get(user_url, params={'salesChannel': 'selfService'}, headers=api_headers)
-            if ur.status_code != 200:
-                print(f"User API still failed after login: {ur.status_code}")
+        # If we haven't tried fresh login yet, try it now
+        if not used_fresh_login:
+            print("Attempting to get live cookies through login...")
+            result = get_live_three_cookies(config)
+            if result:
+                cookie_header, uxf_token = result
+                # Set cookies in session and retry
+                for cookie_str in cookie_header.split('; '):
+                    if '=' in cookie_str:
+                        name, value = cookie_str.split('=', 1)
+                        session.cookies.set(name, value, domain='.three.co.uk')
+                
+                # Store UXF token if available
+                if uxf_token:
+                    session._cached_uxf_token = uxf_token
+                    api_headers['uxfauthorization'] = uxf_token
+                    print(f"✅ Added UXF token to API headers")
+                
+                ur = session.get(user_url, params={'salesChannel': 'selfService'}, headers=api_headers)
+                if ur.status_code != 200:
+                    print(f"User API still failed after login: {ur.status_code}")
+                    return None
+            else:
                 return None
         else:
             return None

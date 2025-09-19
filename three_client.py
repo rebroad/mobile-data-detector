@@ -537,55 +537,7 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
         print(f"  🔍 Browser OAuth: Auth0 domain reached: {on_auth_now} (host={host_now})")
 
         if not on_auth_now:
-            print("  🔍 Browser OAuth: Not on Auth0; proactively clicking a login CTA to navigate there (this is NOT a redirect log)")
-            # Try clicking a CTA/link that leads to auth.three.co.uk, then wait and re-render
-            for attempt in range(1, 4):
-                js_click_auth = """
-                (function(){
-                  var sel = [
-                    'a[href*="auth.three.co.uk"]',
-                    'button[data-href*="auth.three.co.uk"]',
-                    'a[data-href*="auth.three.co.uk"]',
-                    'a[href*="/u/login"], a[href*="/authorize"], a[href*="/oauth" ]'
-                  ];
-                  var el = null;
-                  for (var i=0;i<sel.length;i++){ el = document.querySelector(sel[i]); if (el) break; }
-                  if (!el){
-                    // Fallback: find any link whose href contains 'auth.'
-                    var links = document.querySelectorAll('a');
-                    for (var j=0;j<links.length;j++){ if ((links[j].href||'').indexOf('auth.')>=0){ el = links[j]; break; } }
-                  }
-                  if (el){ el.click(); return 'clicked'; }
-                  return 'not_found';
-                })();
-                """
-                try:
-                    _ = login_page.html.render(script=js_click_auth, timeout=20)
-                except Exception as e:
-                    print(f"  ⚠️ Browser OAuth: CTA click render attempt {attempt} error: {e}")
-                # Allow navigation to occur
-                try:
-                    import time as _time
-                    _time.sleep(2)
-                except Exception:
-                    pass
-                _log_nav(f"Browser OAuth post-CTA attempt {attempt} (proactive navigation)", login_page.url)
-                host_now = (urlparse(login_page.url).netloc or "").lower()
-                on_auth_now = 'auth.three.co.uk' in host_now
-                if on_auth_now:
-                    print("  ✅ Browser OAuth: Arrived on Auth0 domain")
-                    break
-                # Re-render to allow JS-driven redirects
-                try:
-                    login_page.html.render(timeout=20, wait=2)
-                except Exception as e:
-                    print(f"  ⚠️ Browser OAuth: Post-CTA render attempt {attempt} error: {e}")
-                _log_nav(f"Browser OAuth after render attempt {attempt} (waiting for redirect)", login_page.url)
-                host_now = (urlparse(login_page.url).netloc or "").lower()
-                on_auth_now = 'auth.three.co.uk' in host_now
-                if on_auth_now:
-                    print("  ✅ Browser OAuth: Arrived on Auth0 domain")
-                    break
+            print("  🔍 Browser OAuth: Still on www.three.co.uk after JS; will not click or submit. Waiting for site-driven redirect to auth.three.co.uk is required.")
 
         if not on_auth_now:
             print("  ❌ Browser OAuth: Still not on Auth0 login page; will not submit credentials on www.three.co.uk")

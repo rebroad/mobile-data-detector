@@ -217,80 +217,235 @@ def _get_browser_command_for_profile(cookie_db_path: str) -> tuple[Optional[str]
     return (None, None)
 
 
-def _get_live_cookies_via_chrome_debugging() -> Optional[str]:
-    """Get live cookies from running Chrome using Remote Debugging Protocol"""
+def _get_live_cookies_from_chrome() -> Optional[str]:
+    """Get live cookies by copying the cookie database to avoid lock issues"""
     try:
-        import requests
-        import json
+        import tempfile
+        import shutil
+        import os
 
-        # Common Chrome debugging ports
-        debug_ports = [9222, 9223, 9224]
+        print("  🔍 Debug: Attempting to read cookies by copying database...")
 
-        for port in debug_ports:
+        # Get the main Chromium cookie database path
+        cookie_db_path = "/home/rebroad/snap/chromium/common/chromium/Default/Cookies"
+
+        if not os.path.exists(cookie_db_path):
+            print(f"  ❌ Debug: Cookie database not found: {cookie_db_path}")
+            return None
+
+        # Create a temporary copy of the cookie database
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as temp_db:
+            temp_db_path = temp_db.name
+
+        try:
+            # Copy the database file
+            print("  🔄 Debug: Copying cookie database to temporary location...")
+            shutil.copy2(cookie_db_path, temp_db_path)
+
+            # Now read from the copy (no lock issues)
+            print("  📖 Debug: Reading cookies from temporary database copy...")
+            cookie_header = load_cookie_header_via_helper(temp_db_path)
+
+            if cookie_header:
+                print(f"  ✅ Debug: Successfully read cookies from database copy")
+                return cookie_header
+            else:
+                print("  ❌ Debug: No cookies found in database copy")
+                return None
+
+        except Exception as e:
+            print(f"  ❌ Debug: Failed to copy/read cookie database: {e}")
+            return None
+        finally:
+            # Clean up temporary file
             try:
-                # Get list of tabs
-                tabs_response = requests.get(f'http://localhost:{port}/json', timeout=2)
-                if tabs_response.status_code != 200:
-                    continue
+                os.unlink(temp_db_path)
+            except:
+                pass
 
-                tabs = tabs_response.json()
-
-                # Find a tab with three.co.uk
-                three_tab = None
-                for tab in tabs:
-                    if 'three.co.uk' in tab.get('url', ''):
-                        three_tab = tab
-                        break
-
-                if not three_tab:
-                    print(f"  🔍 Debug: No Three Mobile tab found on port {port}")
-                    continue
-
-                # Connect to the tab via WebSocket debugging
-                import websocket
-                ws_url = three_tab['webSocketDebuggerUrl']
-
-                print(f"  🔍 Debug: Connecting to Chrome tab: {three_tab['title'][:50]}...")
-
-                # Use synchronous websocket for simplicity
-                ws = websocket.create_connection(ws_url, timeout=5)
-
-                # Enable Runtime domain
-                ws.send(json.dumps({"id": 1, "method": "Runtime.enable"}))
-                ws.recv()
-
-                # Get cookies for three.co.uk domain
-                ws.send(json.dumps({
-                    "id": 2,
-                    "method": "Runtime.evaluate",
-                    "params": {
-                        "expression": "document.cookie"
-                    }
-                }))
-
-                response = ws.recv()
-                result = json.loads(response)
-
-                ws.close()
-
-                if result.get('result', {}).get('result', {}).get('value'):
-                    cookie_string = result['result']['result']['value']
-                    print(f"  🔍 Debug: Retrieved {len(cookie_string.split(';'))} live cookies from Chrome")
-                    return cookie_string
-
-            except Exception as e:
-                print(f"  🔍 Debug: Chrome debugging port {port} failed: {e}")
-                continue
-
-        print("  🔍 Debug: Chrome Remote Debugging not available")
-        return None
-
-    except ImportError:
-        print("  🔍 Debug: websocket-client not available for Chrome debugging")
-        return None
     except Exception as e:
-        print(f"  🔍 Debug: Chrome debugging failed: {e}")
+        print(f"  ❌ Debug: Cookie database copy failed: {e}")
         return None
+
+
+def _perform_oauth_login(session, config: Dict) -> bool:
+    """Perform OAuth login flow using pure API calls (following HAR patterns exactly)"""
+    try:
+        import urllib.parse
+        import hashlib
+        import base64
+        import secrets
+        import re
+
+        username = config.get('three_username')
+        password = config.get('three_password')
+
+        if not username or not password:
+            print("  ❌ API OAuth: No credentials configured")
+            return False
+
+        print("  🔍 API OAuth: Starting HAR-pattern authentication flow...")
+
+        # Set proper headers to mimic browser exactly (from HAR)
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-GB,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0'
+        })
+
+        # Step 1: Visit Three login page first (as seen in HAR)
+        print("  🔍 API OAuth: Visiting Three login page...")
+        login_page = session.get('https://www.three.co.uk/login')
+
+        if login_page.status_code != 200:
+            print(f"  ❌ API OAuth: Login page failed: {login_page.status_code}")
+            return False
+
+        # Step 2: Generate PKCE parameters (as seen in HAR)
+        code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode('utf-8')).digest()
+        ).decode('utf-8').rstrip('=')
+
+        state = secrets.token_urlsafe(32)
+        nonce = secrets.token_urlsafe(32)
+
+        # Step 3: Start OAuth flow (exact parameters from HAR)
+        auth_params = {
+            'client_id': 'my3account',
+            'redirect_uri': 'https://www.three.co.uk/customer-logged',
+            'response_type': 'code',
+            'scope': 'openid profile',
+            'state': state,
+            'nonce': nonce,
+            'code_challenge': code_challenge,
+            'code_challenge_method': 'S256',
+            'audience': 'https://three-eu.eu.auth0.com/api/v2/'
+        }
+
+        auth_url = 'https://three-eu.eu.auth0.com/authorize?' + urllib.parse.urlencode(auth_params)
+
+        print("  🔍 API OAuth: Starting Auth0 authorization...")
+        auth_response = session.get(auth_url, headers={
+            'Referer': 'https://www.three.co.uk/',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'cross-site'
+        })
+
+        if auth_response.status_code != 200:
+            print(f"  ❌ API OAuth: Auth0 authorization failed: {auth_response.status_code}")
+            return False
+
+        # Step 4: Parse login form (check for anti-automation measures)
+        print("  🔍 API OAuth: Parsing Auth0 login form...")
+
+        if 'captcha' in auth_response.text.lower() or 'recaptcha' in auth_response.text.lower():
+            print("  ⚠️ API OAuth: CAPTCHA detected - need browser fallback")
+            return False
+
+        if 'blocked' in auth_response.text.lower() or 'suspicious' in auth_response.text.lower():
+            print("  ⚠️ API OAuth: Bot detection triggered - need browser fallback")
+            return False
+
+        # Extract form action and state
+        form_match = re.search(r'<form[^>]+action="([^"]+)"[^>]*>', auth_response.text)
+        if not form_match:
+            print("  ❌ API OAuth: No login form found")
+            return False
+
+        form_action = form_match.group(1)
+
+        # Extract all hidden fields and CSRF tokens
+        hidden_fields = {}
+        for match in re.finditer(r'<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"', auth_response.text):
+            hidden_fields[match.group(1)] = match.group(2)
+
+        print(f"  🔍 API OAuth: Found {len(hidden_fields)} form fields")
+
+        # Step 5: Submit credentials with exact headers from HAR
+        print("  🔍 API OAuth: Submitting login credentials...")
+
+        login_data = {
+            'username': username,
+            'password': password,
+            'action': 'default',
+            **hidden_fields
+        }
+
+        login_headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Origin': 'https://three-eu.eu.auth0.com',
+            'Referer': auth_response.url,
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1'
+        }
+
+        login_response = session.post(
+            f"https://three-eu.eu.auth0.com{form_action}",
+            data=login_data,
+            headers=login_headers,
+            allow_redirects=True
+        )
+
+        # Step 6: Check for successful authentication
+        if login_response.status_code == 200:
+            if 'customer-logged' in login_response.url and 'code=' in login_response.url:
+                print("  ✅ API OAuth: Authentication successful!")
+                return True
+            elif 'error' in login_response.url:
+                print("  ❌ API OAuth: Login credentials rejected")
+                return False
+            elif 'mfa' in login_response.text.lower() or '2fa' in login_response.text.lower():
+                print("  ⚠️ API OAuth: 2FA required - need browser fallback")
+                return False
+            else:
+                print("  ⚠️ API OAuth: Unexpected response - need browser fallback")
+                return False
+        else:
+            print(f"  ❌ API OAuth: Login request failed: {login_response.status_code}")
+            return False
+
+    except Exception as e:
+        print(f"  ❌ API OAuth: Failed with error: {e}")
+        return False
+
+
+def _perform_oauth_login_with_render(session, config: Dict) -> bool:
+    """Fallback OAuth using headless browser rendering"""
+    try:
+        print("  🔍 Browser OAuth: Using headless browser rendering...")
+
+        # Use requests-html render() for JavaScript execution
+        username = config.get('three_username')
+        password = config.get('three_password')
+
+        # Visit login page and render JavaScript
+        login_page = session.get('https://www.three.co.uk/login')
+        login_page.html.render(timeout=20)
+
+        # Use the browser to handle the complete OAuth flow
+        print("  🔍 Browser OAuth: JavaScript rendering complete")
+
+        # This would need more implementation, but serves as the fallback
+        # For now, return False to indicate it needs implementation
+        print("  ⚠️ Browser OAuth: Not yet implemented - needs JS automation")
+        return False
+
+    except Exception as e:
+        print(f"  ❌ Browser OAuth: Failed with error: {e}")
+        return False
 
 
 def _test_current_cookies(cookie_db_path: str) -> bool:
@@ -298,14 +453,15 @@ def _test_current_cookies(cookie_db_path: str) -> bool:
     try:
         import requests
 
-        # First try Chrome Remote Debugging to get live cookies
-        live_cookies = _get_live_cookies_via_chrome_debugging()
+        # First try to get live cookies from Chrome DevTools
+        print("  🔍 Debug: Attempting to get live cookies from Chrome...")
+        live_cookies = _get_live_cookies_from_chrome()
         if live_cookies:
-            print("  🔍 Debug: Using live cookies from Chrome Remote Debugging")
+            print("  ✅ Debug: Using live cookies from Chrome DevTools")
             cookie_header = live_cookies
         else:
-            # Fallback to database cookies
-            print("  🔍 Debug: Falling back to database cookies")
+            # Fallback to database cookies (may be locked/empty)
+            print("  ⚠️ Debug: Chrome DevTools failed, falling back to database cookies")
             cookie_header = load_cookie_header_via_helper(cookie_db_path)
 
         if not cookie_header:
@@ -482,55 +638,58 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
 
     session = HTMLSession()
 
-    # Step 1: Always try existing database cookies first (if SSID provided)
+    # Step 1: Try to get live cookies from Chrome DevTools first, then fallback to database
     used_fresh_login = False
     if ssid:
         cookie_db_path = resolve_cookie_db_for_ssid(ssid, config)
         if cookie_db_path:
             print(f"Using cookie database for SSID {ssid}: {cookie_db_path}")
-            cookie_header = load_cookie_header_via_helper(cookie_db_path)
-            if cookie_header:
-                print("✅ Loaded cookies from database")
-                # Test if these cookies are still valid
-                print("🔍 Testing if current cookies are valid...")
-                if _test_current_cookies(cookie_db_path):
-                    print("✅ Current cookies are valid - proceeding with existing authentication")
+
+            # Test cookies (this will try Chrome DevTools first, then database)
+            print("🔍 Testing current authentication...")
+            if _test_current_cookies(cookie_db_path):
+                print("✅ Valid authentication found - proceeding")
+
+                # Try to get live cookies from Chrome first
+                live_cookies = _get_live_cookies_from_chrome()
+                if live_cookies:
+                    print("✅ Using live cookies from Chrome DevTools")
+                    cookie_header = live_cookies
+                else:
+                    print("⚠️ Using database cookies")
+                    cookie_header = load_cookie_header_via_helper(cookie_db_path)
+
+                if cookie_header:
                     # Set cookies in session
                     for cookie_str in cookie_header.split('; '):
                         if '=' in cookie_str:
                             name, value = cookie_str.split('=', 1)
                             session.cookies.set(name, value, domain='.three.co.uk')
                 else:
-                    print("❌ Current cookies are stale - need fresh authentication")
-                    # Launch browser for manual refresh
+                    print("❌ Current cookies are stale or empty - need fresh authentication")
+                    # Use OAuth flow as fallback
                     has_credentials = config.get('three_username') and config.get('three_password')
                     if has_credentials:
-                        print("🔄 Launching browser for manual authentication refresh...")
-                        config['_current_ssid'] = ssid
-                        result = get_live_three_cookies(config)
-                        if result:
-                            cookie_header, uxf_token = result
-                            print("✅ Got fresh cookies from browser login")
-                            # Set fresh cookies in session
-                            for cookie_str in cookie_header.split('; '):
-                                if '=' in cookie_str:
-                                    name, value = cookie_str.split('=', 1)
-                                    session.cookies.set(name, value, domain='.three.co.uk')
+                        print("🔄 Attempting API-based OAuth login (following HAR patterns)...")
+                        oauth_result = _perform_oauth_login(session, config)
+                        if oauth_result:
+                            print("✅ OAuth login successful")
                             used_fresh_login = True
                         else:
-                            # Browser authentication failed, but load old cookies anyway
-                            print("⚠️ Browser authentication failed, using existing cookies...")
-                            for cookie_str in cookie_header.split('; '):
-                                if '=' in cookie_str:
-                                    name, value = cookie_str.split('=', 1)
-                                    session.cookies.set(name, value, domain='.three.co.uk')
+                            print("❌ API OAuth failed - trying headless browser fallback...")
+                            # Fallback to headless browser rendering
+                            browser_result = _perform_oauth_login_with_render(session, config)
+                            if browser_result:
+                                print("✅ Browser OAuth login successful")
+                                used_fresh_login = True
+                            else:
+                                print("❌ All OAuth methods failed")
                     else:
-                        print("⚠️ No credentials configured, using existing cookies...")
-                        # Use existing cookies even if stale
-                        for cookie_str in cookie_header.split('; '):
-                            if '=' in cookie_str:
-                                name, value = cookie_str.split('=', 1)
-                                session.cookies.set(name, value, domain='.three.co.uk')
+                        print("⚠️ No credentials configured and cookies empty")
+                        print("💡 Either:")
+                        print("💡   1. Log into Three Mobile in your browser, or")
+                        print("💡   2. Configure three_username/three_password in config")
+                        return None
             else:
                 print("❌ No cookies found in database")
 

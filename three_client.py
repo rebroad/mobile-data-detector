@@ -578,10 +578,11 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
         if (!submitButton) {{
             // Look for buttons with login text
             var buttons = document.querySelectorAll('button');
-            for (var btn of buttons) {{
-                var text = btn.textContent.toLowerCase();
+            for (var i = 0; i < buttons.length; i++) {{
+                var button = buttons[i];
+                var text = button.textContent.toLowerCase();
                 if (text.includes('log in') || text.includes('sign in') || text.includes('login')) {{
-                    submitButton = btn;
+                    submitButton = button;
                     break;
                 }}
             }}

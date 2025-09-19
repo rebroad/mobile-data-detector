@@ -528,18 +528,64 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
         except Exception as e:
             print(f"  🔍 Browser OAuth: API test error: {e}")
 
-        # Step 2: Look for login form since we're not authenticated
-        print("  🔍 Browser OAuth: Looking for login elements...")
+        # Step 2: Ensure we are on Auth0 before attempting to submit credentials
+        print("  🔍 Browser OAuth: Preparing to locate login form...")
         _log_nav("Browser OAuth current page", login_page.url)
-        try:
-            from urllib.parse import urlparse
-            host_now = (urlparse(login_page.url).netloc or "").lower()
-            on_auth_now = 'auth.three.co.uk' in host_now
-            print(f"  🔍 Browser OAuth: Auth0 domain reached: {on_auth_now} (host={host_now})")
-            if not on_auth_now:
-                print("  🔍 Browser OAuth: Not on Auth0 yet; attempting inline login form on current page")
-        except Exception:
-            pass
+        from urllib.parse import urlparse
+        host_now = (urlparse(login_page.url).netloc or "").lower()
+        on_auth_now = 'auth.three.co.uk' in host_now
+        print(f"  🔍 Browser OAuth: Auth0 domain reached: {on_auth_now} (host={host_now})")
+
+        if not on_auth_now:
+            print("  🔍 Browser OAuth: Trying to navigate to Auth0 login page (will not submit on www.three.co.uk)...")
+            # Try clicking a CTA/link that leads to auth.three.co.uk, then wait and re-render
+            for attempt in range(1, 4):
+                js_click_auth = """
+                (function(){
+                  var sel = [
+                    'a[href*="auth.three.co.uk"]',
+                    'button[data-href*="auth.three.co.uk"]',
+                    'a[data-href*="auth.three.co.uk"]',
+                    'a[href*="/u/login"], a[href*="/authorize"], a[href*="/oauth" ]'
+                  ];
+                  var el = null;
+                  for (var i=0;i<sel.length;i++){ el = document.querySelector(sel[i]); if (el) break; }
+                  if (!el){
+                    // Fallback: find any link whose href contains 'auth.'
+                    var links = document.querySelectorAll('a');
+                    for (var j=0;j<links.length;j++){ if ((links[j].href||'').indexOf('auth.')>=0){ el = links[j]; break; } }
+                  }
+                  if (el){ el.click(); return 'clicked'; }
+                  return 'not_found';
+                })();
+                """
+                try:
+                    _ = login_page.html.render(script=js_click_auth, timeout=20)
+                except Exception:
+                    pass
+                # Allow navigation to occur
+                time.sleep(2)
+                _log_nav(f"Browser OAuth post-CTA attempt {attempt}", login_page.url)
+                host_now = (urlparse(login_page.url).netloc or "").lower()
+                on_auth_now = 'auth.three.co.uk' in host_now
+                if on_auth_now:
+                    print("  ✅ Browser OAuth: Arrived on Auth0 domain")
+                    break
+                # Re-render to allow JS-driven redirects
+                try:
+                    login_page.html.render(timeout=20, wait=2)
+                except Exception:
+                    pass
+                _log_nav(f"Browser OAuth after render attempt {attempt}", login_page.url)
+                host_now = (urlparse(login_page.url).netloc or "").lower()
+                on_auth_now = 'auth.three.co.uk' in host_now
+                if on_auth_now:
+                    print("  ✅ Browser OAuth: Arrived on Auth0 domain")
+                    break
+
+        if not on_auth_now:
+            print("  ❌ Browser OAuth: Still not on Auth0 login page; will not submit credentials on www.three.co.uk")
+            return False
 
         # Try to find username/password fields with broader selectors
         username_selectors = [

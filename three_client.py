@@ -665,33 +665,55 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
                         if '=' in cookie_str:
                             name, value = cookie_str.split('=', 1)
                             session.cookies.set(name, value, domain='.three.co.uk')
-                else:
-                    print("❌ Current cookies are stale or empty - need fresh authentication")
-                    # Use OAuth flow as fallback
-                    has_credentials = config.get('three_username') and config.get('three_password')
-                    if has_credentials:
-                        print("🔄 Attempting API-based OAuth login (following HAR patterns)...")
-                        oauth_result = _perform_oauth_login(session, config)
-                        if oauth_result:
-                            print("✅ OAuth login successful")
+            else:
+                print("❌ Current cookies are stale or empty - need fresh authentication")
+                # Use OAuth flow as fallback
+                has_credentials = config.get('three_username') and config.get('three_password')
+                if has_credentials:
+                    print("🔄 Attempting API-based OAuth login (following HAR patterns)...")
+                    oauth_result = _perform_oauth_login(session, config)
+                    if oauth_result:
+                        print("✅ OAuth login successful")
+                        used_fresh_login = True
+                    else:
+                        print("❌ API OAuth failed - trying headless browser fallback...")
+                        # Fallback to headless browser rendering
+                        browser_result = _perform_oauth_login_with_render(session, config)
+                        if browser_result:
+                            print("✅ Browser OAuth login successful")
                             used_fresh_login = True
                         else:
-                            print("❌ API OAuth failed - trying headless browser fallback...")
-                            # Fallback to headless browser rendering
-                            browser_result = _perform_oauth_login_with_render(session, config)
-                            if browser_result:
-                                print("✅ Browser OAuth login successful")
-                                used_fresh_login = True
-                            else:
-                                print("❌ All OAuth methods failed")
-                    else:
-                        print("⚠️ No credentials configured and cookies empty")
-                        print("💡 Either:")
-                        print("💡   1. Log into Three Mobile in your browser, or")
-                        print("💡   2. Configure three_username/three_password in config")
-                        return None
+                            print("❌ All OAuth methods failed")
+                            return None
+                else:
+                    print("⚠️ No credentials configured and cookies invalid")
+                    print("💡 Either:")
+                    print("💡   1. Log into Three Mobile in your browser, or")
+                    print("💡   2. Configure three_username/three_password in config")
+                    return None
             else:
                 print("❌ No cookies found in database")
+                # No cookies at all - try OAuth fallback
+                has_credentials = config.get('three_username') and config.get('three_password')
+                if has_credentials:
+                    print("🔄 No cookies available - attempting OAuth login...")
+                    oauth_result = _perform_oauth_login(session, config)
+                    if oauth_result:
+                        print("✅ OAuth login successful")
+                    else:
+                        print("❌ API OAuth failed - trying headless browser fallback...")
+                        browser_result = _perform_oauth_login_with_render(session, config)
+                        if browser_result:
+                            print("✅ Browser OAuth login successful")
+                        else:
+                            print("❌ All authentication methods failed")
+                            return None
+                else:
+                    print("⚠️ No cookies and no credentials configured")
+                    print("💡 Either:")
+                    print("💡   1. Log into Three Mobile in your browser, or")
+                    print("💡   2. Configure three_username/three_password in config")
+                    return None
 
     # 2) Hit account to establish cookies
     account_url = "https://www.three.co.uk/account"

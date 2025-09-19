@@ -51,7 +51,7 @@ def _log_nav(prefix: str, url: str) -> None:
 
 
 # --- Lightweight opt-in HTTP tracing for request/response flow comparison ---
-_THREE_TRACE_PATH = os.environ.get('THREE_TRACE_PATH')
+_THREE_TRACE_PATH = os.environ.get('THREE_TRACE_PATH') or '/tmp/three_trace.jsonl'
 if _THREE_TRACE_PATH:
     try:
         # Ensure directory exists
@@ -116,6 +116,7 @@ if _THREE_TRACE_PATH:
 
     # Monkey-patch requests to enable transparent tracing
     requests.Session.request = _traced_request  # type: ignore[assignment]
+    print(f"🔍 HTTP tracing enabled: {_THREE_TRACE_PATH}")
 
 def resolve_cookie_db_for_ssid(ssid: str, config: Dict) -> Optional[str]:
     """Return path to cookie DB for SSID based on config mapping, if found."""
@@ -607,7 +608,7 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
             print("  🔍 Browser OAuth: Still on www.three.co.uk after JS; will not click or submit. Waiting for site-driven redirect to auth.three.co.uk is required.")
             # For diagnostics only: enumerate visible CTA-like elements that might initiate Auth0
             try:
-                js_list_ctas = """
+                js_list_ctas = r"""
                 (function(){
                   function textOf(el){
                     try{ return (el.innerText||el.textContent||'').trim().replace(/\s+/g,' ').slice(0,120);}catch(e){return ''}

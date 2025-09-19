@@ -304,13 +304,35 @@ def _perform_oauth_login(session, config: Dict) -> bool:
 
         # Step 1: Start OAuth flow from Three's login page (as seen in HAR)
         print("  🔍 API OAuth: Starting from Three login page...")
-        login_page = session.get('https://www.three.co.uk/login')
+        print("  🔍 API OAuth: Requesting https://www.three.co.uk/login")
+
+        # Disable automatic redirects to see the redirect chain
+        session.max_redirects = 0
+        try:
+            login_response = session.get('https://www.three.co.uk/login', allow_redirects=False)
+            print(f"  🔍 API OAuth: Initial response: {login_response.status_code}")
+
+            if login_response.status_code in [301, 302, 303, 307, 308]:
+                redirect_url = login_response.headers.get('Location', 'Unknown')
+                print(f"  🔍 API OAuth: Redirected to: {redirect_url}")
+
+                # Follow the redirect
+                session.max_redirects = 30  # Reset to normal
+                login_page = session.get('https://www.three.co.uk/login')
+                print(f"  🔍 API OAuth: Final URL after redirects: {login_page.url}")
+            else:
+                login_page = login_response
+
+        except Exception as e:
+            print(f"  🔍 API OAuth: Redirect tracking failed: {e}")
+            # Fallback to normal request
+            session.max_redirects = 30
+            login_page = session.get('https://www.three.co.uk/login')
+            print(f"  🔍 API OAuth: Final URL (fallback): {login_page.url}")
 
         if login_page.status_code != 200:
             print(f"  ❌ API OAuth: Login page failed: {login_page.status_code}")
             return False
-
-        print(f"  🔍 API OAuth: Login page final URL: {login_page.url}")
 
         # Step 2: Look for the login button/link that starts OAuth flow
         import re
@@ -441,12 +463,19 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
 
         # Step 1: Visit login page and render JavaScript
         print("  🔍 Browser OAuth: Loading Three login page...")
+        print("  🔍 Browser OAuth: Requesting https://www.three.co.uk/login")
+
         login_page = session.get('https://www.three.co.uk/login')
+        print(f"  🔍 Browser OAuth: Initial URL after request: {login_page.url}")
 
         print("  🔍 Browser OAuth: Rendering JavaScript (this may take a moment)...")
         login_page.html.render(timeout=30, wait=3)  # Wait for JS to load
 
-        print(f"  🔍 Browser OAuth: Page rendered, final URL: {login_page.url}")
+        print(f"  🔍 Browser OAuth: Final URL after JavaScript: {login_page.url}")
+
+        # Show if JavaScript caused additional redirects
+        if 'login' not in login_page.url:
+            print(f"  🔍 Browser OAuth: JavaScript redirected from /login to current page")
 
         # Check if we're already logged in (redirected to account page)
         if 'account' in login_page.url or 'customer' in login_page.url or 'logged' in login_page.url:

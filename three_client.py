@@ -938,12 +938,11 @@ def _test_current_cookies(cookie_db_path: str) -> bool:
 
         # Show a sample of key cookies with their values (truncated)
         key_cookie_values = {}
-        for cookie in key_cookies:
-            for cookie_part in cookie_header.split(';'):
-                if cookie_part.strip().startswith(f'{cookie}='):
-                    value = cookie_part.split('=', 1)[1].strip()
-                    key_cookie_values[cookie] = value[:20] + '...' if len(value) > 20 else value
-                    break
+        cookies_with_domains = load_cookies_with_domains(cookie_db_path)
+        for cookie in cookies_with_domains:
+            if cookie['name'] in key_cookies:
+                value = cookie['value']
+                key_cookie_values[cookie['name']] = value[:20] + '...' if len(value) > 20 else value
         print(f"  🔍 Debug: Key cookie values: {key_cookie_values}")
 
         # Quick test API call

@@ -611,17 +611,32 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
             final_url = login_page.url
             print(f"  🔍 Browser OAuth: Final URL after login: {final_url}")
 
-            # Check if we're redirected to customer area (success)
-            if 'customer' in final_url or 'account' in final_url or 'logged' in final_url:
-                print("  ✅ Browser OAuth: Login appears successful!")
+            # Copy any new cookies back to the main session
+            for cookie in login_page.cookies:
+                session.cookies.set(cookie.name, cookie.value, domain=cookie.domain or '.three.co.uk')
 
-                # Copy any new cookies back to the main session
-                for cookie in login_page.cookies:
-                    session.cookies.set(cookie.name, cookie.value, domain=cookie.domain or '.three.co.uk')
+            # Test authentication with API call instead of assuming from URL
+            print("  🔍 Browser OAuth: Testing login success with API call...")
+            try:
+                test_response = session.get('https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user?salesChannel=selfService', timeout=10)
+                if test_response.status_code == 200:
+                    user_data = test_response.json()
+                    user_id = user_data.get('userId', 'Unknown')
+                    is_anonymous = user_data.get('isAnonymous', True)
 
-                return True
-            else:
-                print("  ❌ Browser OAuth: Login did not redirect to customer area")
+                    print(f"  🔍 Browser OAuth: API test result - User: {user_id}, Anonymous: {is_anonymous}")
+
+                    if not is_anonymous and user_id != 'Anonymous':
+                        print(f"  ✅ Browser OAuth: Login successful! Authenticated as: {user_id}")
+                        return True
+                    else:
+                        print(f"  ❌ Browser OAuth: Login failed - still anonymous (User: {user_id})")
+                        return False
+                else:
+                    print(f"  ❌ Browser OAuth: API test failed with status: {test_response.status_code}")
+                    return False
+            except Exception as e:
+                print(f"  ❌ Browser OAuth: API test error: {e}")
                 return False
 
         except Exception as e:

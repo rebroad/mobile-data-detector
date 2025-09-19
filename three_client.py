@@ -537,7 +537,7 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
         print(f"  🔍 Browser OAuth: Auth0 domain reached: {on_auth_now} (host={host_now})")
 
         if not on_auth_now:
-            print("  🔍 Browser OAuth: Trying to navigate to Auth0 login page (will not submit on www.three.co.uk)...")
+            print("  🔍 Browser OAuth: Not on Auth0; proactively clicking a login CTA to navigate there (this is NOT a redirect log)")
             # Try clicking a CTA/link that leads to auth.three.co.uk, then wait and re-render
             for attempt in range(1, 4):
                 js_click_auth = """
@@ -561,11 +561,15 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
                 """
                 try:
                     _ = login_page.html.render(script=js_click_auth, timeout=20)
+                except Exception as e:
+                    print(f"  ⚠️ Browser OAuth: CTA click render attempt {attempt} error: {e}")
+                # Allow navigation to occur
+                try:
+                    import time as _time
+                    _time.sleep(2)
                 except Exception:
                     pass
-                # Allow navigation to occur
-                time.sleep(2)
-                _log_nav(f"Browser OAuth post-CTA attempt {attempt}", login_page.url)
+                _log_nav(f"Browser OAuth post-CTA attempt {attempt} (proactive navigation)", login_page.url)
                 host_now = (urlparse(login_page.url).netloc or "").lower()
                 on_auth_now = 'auth.three.co.uk' in host_now
                 if on_auth_now:
@@ -574,9 +578,9 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
                 # Re-render to allow JS-driven redirects
                 try:
                     login_page.html.render(timeout=20, wait=2)
-                except Exception:
-                    pass
-                _log_nav(f"Browser OAuth after render attempt {attempt}", login_page.url)
+                except Exception as e:
+                    print(f"  ⚠️ Browser OAuth: Post-CTA render attempt {attempt} error: {e}")
+                _log_nav(f"Browser OAuth after render attempt {attempt} (waiting for redirect)", login_page.url)
                 host_now = (urlparse(login_page.url).netloc or "").lower()
                 on_auth_now = 'auth.three.co.uk' in host_now
                 if on_auth_now:

@@ -428,25 +428,137 @@ def _perform_oauth_login(session, config: Dict) -> bool:
 
 
 def _perform_oauth_login_with_render(session, config: Dict) -> bool:
-    """Fallback OAuth using headless browser rendering"""
+    """OAuth using headless browser with JavaScript automation"""
     try:
-        print("  🔍 Browser OAuth: Using headless browser rendering...")
+        print("  🔍 Browser OAuth: Using headless browser with JavaScript...")
 
-        # Use requests-html render() for JavaScript execution
         username = config.get('three_username')
         password = config.get('three_password')
 
-        # Visit login page and render JavaScript
+        if not username or not password:
+            print("  ❌ Browser OAuth: No credentials configured")
+            return False
+
+        # Step 1: Visit login page and render JavaScript
+        print("  🔍 Browser OAuth: Loading Three login page...")
         login_page = session.get('https://www.three.co.uk/login')
-        login_page.html.render(timeout=20)
 
-        # Use the browser to handle the complete OAuth flow
-        print("  🔍 Browser OAuth: JavaScript rendering complete")
+        print("  🔍 Browser OAuth: Rendering JavaScript (this may take a moment)...")
+        login_page.html.render(timeout=30, wait=3)  # Wait for JS to load
 
-        # This would need more implementation, but serves as the fallback
-        # For now, return False to indicate it needs implementation
-        print("  ⚠️ Browser OAuth: Not yet implemented - needs JS automation")
-        return False
+        print(f"  🔍 Browser OAuth: Page rendered, final URL: {login_page.url}")
+
+        # Check if we're already logged in (redirected to account page)
+        if 'account' in login_page.url or 'customer' in login_page.url or 'logged' in login_page.url:
+            print("  🎉 Browser OAuth: Already logged in! Extracting session cookies...")
+
+            # Copy all cookies from the rendered page
+            for cookie in login_page.cookies:
+                session.cookies.set(cookie.name, cookie.value, domain=cookie.domain or '.three.co.uk')
+
+            return True
+
+        # Step 2: Look for login form or Auth0 elements after JS execution
+        print("  🔍 Browser OAuth: Looking for login elements...")
+
+        # Try to find username/password fields
+        username_input = login_page.html.find('input[type="email"]', first=True) or \
+                        login_page.html.find('input[name*="username"]', first=True) or \
+                        login_page.html.find('input[name*="email"]', first=True) or \
+                        login_page.html.find('#username', first=True) or \
+                        login_page.html.find('#email', first=True)
+
+        password_input = login_page.html.find('input[type="password"]', first=True) or \
+                        login_page.html.find('input[name*="password"]', first=True) or \
+                        login_page.html.find('#password', first=True)
+
+        login_button = login_page.html.find('button[type="submit"]', first=True) or \
+                      login_page.html.find('input[type="submit"]', first=True) or \
+                      login_page.html.find('button:contains("Log in")', first=True) or \
+                      login_page.html.find('button:contains("Sign in")', first=True)
+
+        if not username_input or not password_input:
+            print("  ❌ Browser OAuth: Login form not found after JS rendering")
+            print(f"  🔍 Debug: Username field: {bool(username_input)}")
+            print(f"  🔍 Debug: Password field: {bool(password_input)}")
+            return False
+
+        print("  ✅ Browser OAuth: Login form found!")
+
+        # Step 3: Fill in the form using JavaScript
+        print("  🔍 Browser OAuth: Filling login form...")
+
+        # Use evaluate() to fill the form with JavaScript
+        js_code = f"""
+        // Find and fill username field
+        var usernameField = document.querySelector('input[type="email"], input[name*="username"], input[name*="email"], #username, #email');
+        if (usernameField) {{
+            usernameField.value = '{username}';
+            usernameField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            usernameField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        }}
+
+        // Find and fill password field
+        var passwordField = document.querySelector('input[type="password"], input[name*="password"], #password');
+        if (passwordField) {{
+            passwordField.value = '{password}';
+            passwordField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            passwordField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        }}
+
+        // Submit the form
+        var submitButton = document.querySelector('button[type="submit"], input[type="submit"]');
+        if (!submitButton) {{
+            // Look for buttons with login text
+            var buttons = document.querySelectorAll('button');
+            for (var btn of buttons) {{
+                var text = btn.textContent.toLowerCase();
+                if (text.includes('log in') || text.includes('sign in') || text.includes('login')) {{
+                    submitButton = btn;
+                    break;
+                }}
+            }}
+        }}
+
+        if (submitButton) {{
+            submitButton.click();
+        }} else {{
+            // Try form submit
+            var form = document.querySelector('form');
+            if (form) form.submit();
+        }}
+
+        // Return success
+        'form_submitted';
+        """
+
+        try:
+            result = login_page.html.render(script=js_code, timeout=20)
+            print("  🔍 Browser OAuth: Form submission attempted")
+
+            # Wait for potential redirects and check final URL
+            import time
+            time.sleep(5)
+
+            final_url = login_page.url
+            print(f"  🔍 Browser OAuth: Final URL after login: {final_url}")
+
+            # Check if we're redirected to customer area (success)
+            if 'customer' in final_url or 'account' in final_url or 'logged' in final_url:
+                print("  ✅ Browser OAuth: Login appears successful!")
+
+                # Copy any new cookies back to the main session
+                for cookie in login_page.cookies:
+                    session.cookies.set(cookie.name, cookie.value, domain=cookie.domain or '.three.co.uk')
+
+                return True
+            else:
+                print("  ❌ Browser OAuth: Login did not redirect to customer area")
+                return False
+
+        except Exception as e:
+            print(f"  ❌ Browser OAuth: JavaScript execution failed: {e}")
+            return False
 
     except Exception as e:
         print(f"  ❌ Browser OAuth: Failed with error: {e}")

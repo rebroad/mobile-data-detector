@@ -15,7 +15,7 @@ import sqlite3
 import tempfile
 import shutil
 import requests
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 
 def load_config(config_file: str = "/etc/mobile_data_monitor.conf") -> Dict[str, Any]:
@@ -196,6 +196,42 @@ def load_cookie_header_via_helper(cookie_db_path: str) -> Optional[str]:
 
             conn.close()
             return '; '.join(cookies) if cookies else None
+
+def load_cookies_with_domains(cookie_db_path: str) -> List[Dict[str, str]]:
+    """Read cookies with their domains from Chrome/Chromium SQLite database."""
+    try:
+        # Copy the cookie DB to a temp location since it might be locked
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.db') as temp_db:
+            shutil.copy2(cookie_db_path, temp_db.name)
+            temp_db_path = temp_db.name
+
+        try:
+            # Connect to the cookie database
+            conn = sqlite3.connect(temp_db_path)
+            cursor = conn.cursor()
+
+            # Query cookies for three.co.uk domain
+            cursor.execute("""
+                SELECT name, value, host_key, path, expires_utc, is_secure, is_httponly
+                FROM cookies
+                WHERE host_key LIKE '%three.co.uk%' OR host_key LIKE '%.three.co.uk%'
+            """)
+
+            cookies = []
+            for row in cursor.fetchall():
+                name, value, host_key, path, expires_utc, is_secure, is_httponly = row
+                # Skip expired cookies
+                if expires_utc and expires_utc > 0 and expires_utc < (time.time() * 1000000):
+                    continue
+                cookies.append({
+                    'name': name,
+                    'value': value,
+                    'domain': host_key,
+                    'path': path
+                })
+
+            conn.close()
+            return cookies
 
         finally:
             # Clean up temp file
@@ -1047,11 +1083,15 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
                     cookie_header = load_cookie_header_via_helper(cookie_db_path)
 
                 if cookie_header:
-                    # Set cookies in session
-                    for cookie_str in cookie_header.split('; '):
-                        if '=' in cookie_str:
-                            name, value = cookie_str.split('=', 1)
-                            session.cookies.set(name, value, domain='.three.co.uk')
+                    # Load cookies with their correct domains
+                    cookies_with_domains = load_cookies_with_domains(cookie_db_path)
+                    for cookie in cookies_with_domains:
+                        session.cookies.set(
+                            cookie['name'],
+                            cookie['value'],
+                            domain=cookie['domain'],
+                            path=cookie['path']
+                        )
             else:
                 print("❌ Current cookies are stale or empty - need fresh authentication")
                 # Use OAuth flow as fallback

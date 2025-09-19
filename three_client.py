@@ -197,6 +197,17 @@ def load_cookie_header_via_helper(cookie_db_path: str) -> Optional[str]:
             conn.close()
             return '; '.join(cookies) if cookies else None
 
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(temp_db_path)
+            except Exception:
+                pass
+
+    except Exception as e:
+        print(f"Error reading cookies: {e}")
+        return None
+
 def load_cookies_with_domains(cookie_db_path: str) -> List[Dict[str, str]]:
     """Read cookies with their domains from Chrome/Chromium SQLite database."""
     try:

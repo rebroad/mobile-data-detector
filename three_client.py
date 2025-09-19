@@ -33,6 +33,23 @@ def load_config(config_file: str = "/etc/mobile_data_monitor.conf") -> Dict[str,
     return config
 
 
+def _log_nav(prefix: str, url: str) -> None:
+    """Compact navigation logger that highlights the current domain.
+
+    Example output:
+      🔍 Step: https://www.three.co.uk/account  (host=www.three.co.uk, on_auth=False, on_www=True)
+    """
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url or "")
+        host = parsed.netloc or "(no-host)"
+        on_auth = "auth.three.co.uk" in host
+        on_www = "www.three.co.uk" in host
+        print(f"  🔍 {prefix}: {url}  (host={host}, on_auth={on_auth}, on_www={on_www})")
+    except Exception:
+        print(f"  🔍 {prefix}: {url}")
+
+
 def resolve_cookie_db_for_ssid(ssid: str, config: Dict) -> Optional[str]:
     """Return path to cookie DB for SSID based on config mapping, if found."""
     mappings_str = config.get('ssid_cookie_profiles', '')
@@ -311,15 +328,17 @@ def _perform_oauth_login(session, config: Dict) -> bool:
         try:
             login_response = session.get('https://www.three.co.uk/login', allow_redirects=False)
             print(f"  🔍 API OAuth: Initial response: {login_response.status_code}")
+            _log_nav("API OAuth initial URL", login_response.url)
 
             if login_response.status_code in [301, 302, 303, 307, 308]:
                 redirect_url = login_response.headers.get('Location', 'Unknown')
                 print(f"  🔍 API OAuth: Redirected to: {redirect_url}")
+                _log_nav("API OAuth redirect target", redirect_url)
 
                 # Follow the redirect
                 session.max_redirects = 30  # Reset to normal
                 login_page = session.get('https://www.three.co.uk/login')
-                print(f"  🔍 API OAuth: Final URL after redirects: {login_page.url}")
+                _log_nav("API OAuth final URL after redirects", login_page.url)
             else:
                 login_page = login_response
 
@@ -328,7 +347,7 @@ def _perform_oauth_login(session, config: Dict) -> bool:
             # Fallback to normal request
             session.max_redirects = 30
             login_page = session.get('https://www.three.co.uk/login')
-            print(f"  🔍 API OAuth: Final URL (fallback): {login_page.url}")
+            _log_nav("API OAuth final URL (fallback)", login_page.url)
 
         if login_page.status_code != 200:
             print(f"  ❌ API OAuth: Login page failed: {login_page.status_code}")
@@ -466,23 +485,23 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
         print("  🔍 Browser OAuth: Requesting https://www.three.co.uk/login")
 
         login_page = session.get('https://www.three.co.uk/login')
-        print(f"  🔍 Browser OAuth: Initial URL after request: {login_page.url}")
+        _log_nav("Browser OAuth initial URL", login_page.url)
 
         print("  🔍 Browser OAuth: Rendering JavaScript (this may take a moment)...")
         login_page.html.render(timeout=30, wait=3)  # Wait for JS to load
 
-        print(f"  🔍 Browser OAuth: URL after initial JS: {login_page.url}")
+        _log_nav("Browser OAuth after initial JS", login_page.url)
 
         # Check if we're redirected to Auth0 domain
         if 'auth.three.co.uk' not in login_page.url:
             print("  🔍 Browser OAuth: Not yet on Auth0 domain, waiting for additional redirects...")
             # Wait longer for OAuth redirects to complete
             login_page.html.render(timeout=30, wait=5)
-            print(f"  🔍 Browser OAuth: URL after waiting for redirects: {login_page.url}")
+            _log_nav("Browser OAuth after waiting for redirects", login_page.url)
 
         # Show if JavaScript caused additional redirects
         if 'login' not in login_page.url:
-            print(f"  🔍 Browser OAuth: JavaScript redirected from /login to: {login_page.url}")
+            _log_nav("Browser OAuth JS redirected to", login_page.url)
 
         # Test if we're actually authenticated by making an API call
         print("  🔍 Browser OAuth: Testing authentication with API call...")
@@ -511,7 +530,16 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
 
         # Step 2: Look for login form since we're not authenticated
         print("  🔍 Browser OAuth: Looking for login elements...")
-        print(f"  🔍 Browser OAuth: Current domain: {login_page.url}")
+        _log_nav("Browser OAuth current page", login_page.url)
+        try:
+            from urllib.parse import urlparse
+            host_now = (urlparse(login_page.url).netloc or "").lower()
+            on_auth_now = 'auth.three.co.uk' in host_now
+            print(f"  🔍 Browser OAuth: Auth0 domain reached: {on_auth_now} (host={host_now})")
+            if not on_auth_now:
+                print("  🔍 Browser OAuth: Not on Auth0 yet; attempting inline login form on current page")
+        except Exception:
+            pass
 
         # Try to find username/password fields with broader selectors
         username_selectors = [
@@ -557,10 +585,10 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
             print(f"  🔍 Debug: Page content sample: {page_text[:200]}...")
             return False
 
-        print("  ✅ Browser OAuth: Login form found!")
+        print(f"  ✅ Browser OAuth: Login form found (host={host_now}, on_auth={on_auth_now})!")
 
         # Step 3: Fill in the form using JavaScript
-        print("  🔍 Browser OAuth: Filling login form...")
+        print(f"  🔍 Browser OAuth: Filling and submitting form on host={host_now} (on_auth={on_auth_now})...")
 
         # Use evaluate() to fill the form with JavaScript
         js_code = f"""
@@ -616,7 +644,7 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
             time.sleep(5)
 
             final_url = login_page.url
-            print(f"  🔍 Browser OAuth: Final URL after login: {final_url}")
+            _log_nav("Browser OAuth final URL after login", final_url)
 
             # Copy any new cookies back to the main session
             for cookie in login_page.cookies:

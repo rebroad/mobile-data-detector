@@ -376,10 +376,12 @@ def _get_live_cookies_from_chrome() -> Optional[str]:
 
             # Now read from the copy (no lock issues)
             print("  📖 Debug: Reading cookies from temporary database copy...")
-            cookie_header = load_cookie_header_via_helper(temp_db_path)
+            cookies_with_domains = load_cookies_with_domains(temp_db_path)
 
-            if cookie_header:
+            if cookies_with_domains:
                 print(f"  ✅ Debug: Successfully read cookies from database copy")
+                # Convert to cookie header format for compatibility
+                cookie_header = '; '.join([f"{c['name']}={c['value']}" for c in cookies_with_domains])
                 return cookie_header
             else:
                 print("  ❌ Debug: No cookies found in database copy")

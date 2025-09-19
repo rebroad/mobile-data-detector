@@ -1074,6 +1074,195 @@ def _wait_for_authentication(cookie_db_path: str, timeout: int = 300) -> bool:
     return False
 
 
+def _get_session_storage_path(ssid: str) -> str:
+    """Get path for storing headless browser session data"""
+    import os
+    session_dir = os.path.expanduser("~/.three_mobile_sessions")
+    os.makedirs(session_dir, exist_ok=True)
+    return os.path.join(session_dir, f"session_{ssid.replace(' ', '_')}")
+
+def _save_session_data(session_path: str, cookies: list, local_storage: dict = None) -> None:
+    """Save session data to disk"""
+    import json
+    import pickle
+
+    session_data = {
+        'cookies': cookies,
+        'local_storage': local_storage or {},
+        'timestamp': time.time()
+    }
+
+    with open(session_path, 'wb') as f:
+        pickle.dump(session_data, f)
+
+    print(f"💾 Session data saved to {session_path}")
+
+def _load_session_data(session_path: str) -> Optional[dict]:
+    """Load session data from disk"""
+    import pickle
+    import os
+
+    if not os.path.exists(session_path):
+        return None
+
+    try:
+        with open(session_path, 'rb') as f:
+            session_data = pickle.load(f)
+
+        # Check if session is not too old (e.g., 7 days)
+        if time.time() - session_data.get('timestamp', 0) > 7 * 24 * 3600:
+            print("⚠️ Session data is too old, will re-authenticate")
+            return None
+
+        print(f"📂 Loaded session data from {session_path}")
+        return session_data
+    except Exception as e:
+        print(f"❌ Failed to load session data: {e}")
+        return None
+
+def _setup_headless_browser_with_session(ssid: str, config: Dict) -> Optional[Any]:
+    """Setup headless browser with persistent session storage"""
+    try:
+        from requests_html import HTMLSession
+        import tempfile
+        import shutil
+        import os
+
+        session_path = _get_session_storage_path(ssid)
+        session_data = _load_session_data(session_path)
+
+        # Create a dedicated user data directory for this session
+        user_data_dir = os.path.join(tempfile.gettempdir(), f"three_headless_{ssid.replace(' ', '_')}")
+        os.makedirs(user_data_dir, exist_ok=True)
+
+        # Create HTMLSession with custom browser args
+        session = HTMLSession()
+
+        # If we have saved session data, restore it
+        if session_data:
+            print("🔄 Restoring saved session...")
+            # Restore cookies
+            for cookie in session_data.get('cookies', []):
+                session.cookies.set(
+                    cookie['name'],
+                    cookie['value'],
+                    domain=cookie.get('domain'),
+                    path=cookie.get('path', '/')
+                )
+
+            # Test if session is still valid
+            test_response = session.get('https://www.three.co.uk/account')
+            if 'Anonymous' not in test_response.text:
+                print("✅ Saved session is still valid")
+                return session
+            else:
+                print("⚠️ Saved session is invalid, will re-authenticate")
+
+        # No valid session, need to authenticate
+        print("🔐 No valid session found, starting authentication...")
+        return _authenticate_headless_browser(session, user_data_dir, session_path, config)
+
+    except Exception as e:
+        print(f"❌ Failed to setup headless browser: {e}")
+        return None
+
+def _authenticate_headless_browser(session: Any, user_data_dir: str, session_path: str, config: Dict) -> Optional[Any]:
+    """Authenticate using headless browser and save session"""
+    try:
+        print("🌐 Starting headless browser authentication...")
+        print("👤 You will need to complete 2FA in the browser window that opens")
+
+        # Navigate to login page
+        response = session.get('https://www.three.co.uk/login')
+
+        # Render the page to execute JavaScript
+        print("🔄 Rendering login page...")
+        response.html.render(timeout=30)
+
+        # Check if we're redirected to Auth0
+        current_url = response.html.url
+        if 'auth.three.co.uk' in current_url:
+            print("✅ Redirected to Auth0 login page")
+
+            # Fill in credentials if available
+            username = config.get('three_username')
+            password = config.get('three_password')
+
+            if username and password:
+                print("🔑 Filling in credentials...")
+                # Fill username
+                username_script = f"""
+                var usernameField = document.querySelector('input[name="username"], input[type="email"], input[placeholder*="email"], input[placeholder*="username"]');
+                if (usernameField) {{
+                    usernameField.value = '{username}';
+                    usernameField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    usernameField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }}
+                """
+                response.html.render(script=username_script)
+
+                # Fill password
+                password_script = f"""
+                var passwordField = document.querySelector('input[name="password"], input[type="password"]');
+                if (passwordField) {{
+                    passwordField.value = '{password}';
+                    passwordField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    passwordField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                }}
+                """
+                response.html.render(script=password_script)
+
+                # Submit form
+                submit_script = """
+                var submitBtn = document.querySelector('button[type="submit"], input[type="submit"], button:contains("Log in"), button:contains("Sign in")');
+                if (submitBtn) {
+                    submitBtn.click();
+                }
+                """
+                response.html.render(script=submit_script)
+
+                print("📤 Credentials submitted, waiting for 2FA...")
+            else:
+                print("⚠️ No credentials configured, please fill in manually")
+
+            # Wait for user to complete 2FA
+            print("⏳ Please complete 2FA in the browser window...")
+            print("🔄 Monitoring for authentication completion...")
+
+            # Monitor for successful authentication
+            for attempt in range(60):  # Wait up to 5 minutes
+                time.sleep(5)
+
+                # Check authentication status
+                test_response = session.get('https://www.three.co.uk/account')
+                if 'Anonymous' not in test_response.text:
+                    print("✅ Authentication successful!")
+
+                    # Save session data
+                    cookies = []
+                    for cookie in session.cookies:
+                        cookies.append({
+                            'name': cookie.name,
+                            'value': cookie.value,
+                            'domain': cookie.domain,
+                            'path': cookie.path
+                        })
+
+                    _save_session_data(session_path, cookies)
+                    return session
+
+                print(f"⏳ Still waiting for authentication... ({attempt + 1}/60)")
+
+            print("❌ Authentication timeout")
+            return None
+        else:
+            print(f"❌ Not redirected to Auth0, current URL: {current_url}")
+            return None
+
+    except Exception as e:
+        print(f"❌ Authentication failed: {e}")
+        return None
+
 def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """API-only flow within a headless HTMLSession. No page render.
 
@@ -1127,21 +1316,12 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
                 # Use OAuth flow as fallback
                 has_credentials = config.get('three_username') and config.get('three_password')
                 if has_credentials:
-                    print("🔄 Attempting API-based OAuth login (following HAR patterns)...")
-                    oauth_result = _perform_oauth_login(session, config)
-                    if oauth_result:
-                        print("✅ OAuth login successful")
-                        used_fresh_login = True
-                    else:
-                        print("❌ API OAuth failed - trying headless browser fallback...")
-                        # Fallback to headless browser rendering
-                        browser_result = _perform_oauth_login_with_render(session, config)
-                        if browser_result:
-                            print("✅ Browser OAuth login successful")
-                            used_fresh_login = True
-                        else:
-                            print("❌ All OAuth methods failed")
-                            return None
+                    print(f"🔐 Setting up headless browser session for SSID: {ssid}")
+                    session = _setup_headless_browser_with_session(ssid, config)
+                    if not session:
+                        print("❌ Failed to setup headless browser session")
+                        return None
+                    print("✅ Headless browser session ready")
                 else:
                     print("⚠️ No credentials configured and cookies invalid")
                     print("💡 Either:")
@@ -1171,6 +1351,9 @@ def fetch_three_allowance_via_headless(config: Dict, ssid: Optional[str] = None)
                 print("💡   1. Log into Three Mobile in your browser, or")
                 print("💡   2. Configure three_username/three_password in config")
                 return None
+    else:
+        print("❌ No SSID provided")
+        return None
 
     # 2) Hit account to establish cookies
     account_url = "https://www.three.co.uk/account"

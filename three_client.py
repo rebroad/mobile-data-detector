@@ -471,11 +471,18 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
         print("  🔍 Browser OAuth: Rendering JavaScript (this may take a moment)...")
         login_page.html.render(timeout=30, wait=3)  # Wait for JS to load
 
-        print(f"  🔍 Browser OAuth: Final URL after JavaScript: {login_page.url}")
+        print(f"  🔍 Browser OAuth: URL after initial JS: {login_page.url}")
+
+        # Check if we're redirected to Auth0 domain
+        if 'auth.three.co.uk' not in login_page.url:
+            print("  🔍 Browser OAuth: Not yet on Auth0 domain, waiting for additional redirects...")
+            # Wait longer for OAuth redirects to complete
+            login_page.html.render(timeout=30, wait=5)
+            print(f"  🔍 Browser OAuth: URL after waiting for redirects: {login_page.url}")
 
         # Show if JavaScript caused additional redirects
         if 'login' not in login_page.url:
-            print(f"  🔍 Browser OAuth: JavaScript redirected from /login to current page")
+            print(f"  🔍 Browser OAuth: JavaScript redirected from /login to: {login_page.url}")
 
         # Test if we're actually authenticated by making an API call
         print("  🔍 Browser OAuth: Testing authentication with API call...")

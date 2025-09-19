@@ -50,6 +50,73 @@ def _log_nav(prefix: str, url: str) -> None:
         print(f"  🔍 {prefix}: {url}")
 
 
+# --- Lightweight opt-in HTTP tracing for request/response flow comparison ---
+_THREE_TRACE_PATH = os.environ.get('THREE_TRACE_PATH')
+if _THREE_TRACE_PATH:
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(_THREE_TRACE_PATH), exist_ok=True)
+    except Exception:
+        pass
+
+    _ORIG_REQUEST = requests.Session.request
+
+    def _trace_write(record: Dict[str, Any]) -> None:
+        try:
+            with open(_THREE_TRACE_PATH, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            # Tracing must never break primary logic
+            pass
+
+    def _traced_request(self, method, url, **kwargs):  # type: ignore[override]
+        start_ts = time.time()
+        req_headers = {}
+        try:
+            if 'headers' in kwargs and isinstance(kwargs['headers'], dict):
+                req_headers = {str(k).lower(): str(v) for k, v in kwargs['headers'].items()}
+        except Exception:
+            req_headers = {}
+
+        try:
+            resp = _ORIG_REQUEST(self, method, url, **kwargs)
+        except Exception as e:
+            _trace_write({
+                'ts': start_ts,
+                'event': 'request_error',
+                'method': method,
+                'url': url,
+                'error': repr(e),
+                'request_headers': req_headers,
+            })
+            raise
+
+        try:
+            _trace_write({
+                'ts': start_ts,
+                'event': 'response',
+                'method': method,
+                'url': url,
+                'final_url': getattr(resp, 'url', url),
+                'status': getattr(resp, 'status_code', None),
+                'is_redirect': bool(getattr(resp, 'is_redirect', False)),
+                'history': [
+                    {
+                        'url': getattr(h, 'url', ''),
+                        'status': getattr(h, 'status_code', None)
+                    } for h in getattr(resp, 'history', [])
+                ],
+                'request_headers': req_headers,
+                'response_headers': {k.lower(): v for k, v in getattr(resp, 'headers', {}).items()}
+            })
+        except Exception:
+            pass
+
+        return resp
+
+    # Monkey-patch requests to enable transparent tracing
+    requests.Session.request = _traced_request  # type: ignore[assignment]
+
 def resolve_cookie_db_for_ssid(ssid: str, config: Dict) -> Optional[str]:
     """Return path to cookie DB for SSID based on config mapping, if found."""
     mappings_str = config.get('ssid_cookie_profiles', '')

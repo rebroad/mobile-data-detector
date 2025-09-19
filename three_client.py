@@ -477,18 +477,32 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
         if 'login' not in login_page.url:
             print(f"  🔍 Browser OAuth: JavaScript redirected from /login to current page")
 
-        # Check if we're actually authenticated by looking for user-specific content
-        page_text = login_page.html.text.lower()
-        if any(indicator in page_text for indicator in ['welcome back', 'my account', 'logout', 'sign out', 'your allowance']):
-            print("  🎉 Browser OAuth: Already authenticated! Found user-specific content...")
+        # Test if we're actually authenticated by making an API call
+        print("  🔍 Browser OAuth: Testing authentication with API call...")
 
-            # Copy all cookies from the rendered page
-            for cookie in login_page.cookies:
-                session.cookies.set(cookie.name, cookie.value, domain=cookie.domain or '.three.co.uk')
+        # Copy cookies from the rendered page
+        for cookie in login_page.cookies:
+            session.cookies.set(cookie.name, cookie.value, domain=cookie.domain or '.three.co.uk')
 
-            return True
+        # Test authentication with the B2C user API
+        try:
+            test_response = session.get('https://www.three.co.uk/rp-server-b2c/authentication/v1/B2C/user?salesChannel=selfService', timeout=10)
+            if test_response.status_code == 200:
+                user_data = test_response.json()
+                user_id = user_data.get('userId', 'Unknown')
+                is_anonymous = user_data.get('isAnonymous', True)
 
-        # Step 2: Look for login form or Auth0 elements after JS execution
+                if not is_anonymous and user_id != 'Anonymous':
+                    print(f"  🎉 Browser OAuth: Already authenticated! User ID: {user_id}")
+                    return True
+                else:
+                    print(f"  🔍 Browser OAuth: Not authenticated (User: {user_id}, Anonymous: {is_anonymous})")
+            else:
+                print(f"  🔍 Browser OAuth: API test failed: {test_response.status_code}")
+        except Exception as e:
+            print(f"  🔍 Browser OAuth: API test error: {e}")
+
+        # Step 2: Look for login form since we're not authenticated
         print("  🔍 Browser OAuth: Looking for login elements...")
         print(f"  🔍 Browser OAuth: Current domain: {login_page.url}")
 

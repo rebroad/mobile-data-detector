@@ -477,9 +477,10 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
         if 'login' not in login_page.url:
             print(f"  🔍 Browser OAuth: JavaScript redirected from /login to current page")
 
-        # Check if we're already logged in (redirected to account page)
-        if 'account' in login_page.url or 'customer' in login_page.url or 'logged' in login_page.url:
-            print("  🎉 Browser OAuth: Already logged in! Extracting session cookies...")
+        # Check if we're actually authenticated by looking for user-specific content
+        page_text = login_page.html.text.lower()
+        if any(indicator in page_text for indicator in ['welcome back', 'my account', 'logout', 'sign out', 'your allowance']):
+            print("  🎉 Browser OAuth: Already authenticated! Found user-specific content...")
 
             # Copy all cookies from the rendered page
             for cookie in login_page.cookies:
@@ -489,27 +490,50 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
 
         # Step 2: Look for login form or Auth0 elements after JS execution
         print("  🔍 Browser OAuth: Looking for login elements...")
+        print(f"  🔍 Browser OAuth: Current domain: {login_page.url}")
 
-        # Try to find username/password fields
-        username_input = login_page.html.find('input[type="email"]', first=True) or \
-                        login_page.html.find('input[name*="username"]', first=True) or \
-                        login_page.html.find('input[name*="email"]', first=True) or \
-                        login_page.html.find('#username', first=True) or \
-                        login_page.html.find('#email', first=True)
+        # Try to find username/password fields with broader selectors
+        username_selectors = [
+            'input[type="email"]',
+            'input[type="text"][name*="username"]',
+            'input[type="text"][name*="email"]',
+            'input[name*="username"]',
+            'input[name*="email"]',
+            'input[placeholder*="email"]',
+            'input[placeholder*="username"]',
+            '#username', '#email', '#user', '#login'
+        ]
 
-        password_input = login_page.html.find('input[type="password"]', first=True) or \
-                        login_page.html.find('input[name*="password"]', first=True) or \
-                        login_page.html.find('#password', first=True)
+        password_selectors = [
+            'input[type="password"]',
+            'input[name*="password"]',
+            'input[placeholder*="password"]',
+            '#password', '#pass'
+        ]
 
-        login_button = login_page.html.find('button[type="submit"]', first=True) or \
-                      login_page.html.find('input[type="submit"]', first=True) or \
-                      login_page.html.find('button:contains("Log in")', first=True) or \
-                      login_page.html.find('button:contains("Sign in")', first=True)
+        username_input = None
+        for selector in username_selectors:
+            username_input = login_page.html.find(selector, first=True)
+            if username_input:
+                print(f"  🔍 Browser OAuth: Found username field with: {selector}")
+                break
+
+        password_input = None
+        for selector in password_selectors:
+            password_input = login_page.html.find(selector, first=True)
+            if password_input:
+                print(f"  🔍 Browser OAuth: Found password field with: {selector}")
+                break
 
         if not username_input or not password_input:
             print("  ❌ Browser OAuth: Login form not found after JS rendering")
-            print(f"  🔍 Debug: Username field: {bool(username_input)}")
-            print(f"  🔍 Debug: Password field: {bool(password_input)}")
+            print(f"  🔍 Debug: Username field found: {bool(username_input)}")
+            print(f"  🔍 Debug: Password field found: {bool(password_input)}")
+            print(f"  🔍 Debug: Page title: {login_page.html.find('title', first=True)}")
+
+            # Show some page content for debugging
+            page_text = login_page.html.text[:500] if login_page.html.text else "No text content"
+            print(f"  🔍 Debug: Page content sample: {page_text[:200]}...")
             return False
 
         print("  ✅ Browser OAuth: Login form found!")

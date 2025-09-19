@@ -51,8 +51,19 @@ def _log_nav(prefix: str, url: str) -> None:
 
 
 # --- Lightweight opt-in HTTP tracing for request/response flow comparison ---
-_THREE_TRACE_PATH = os.environ.get('THREE_TRACE_PATH') or '/tmp/three_trace.jsonl'
-if _THREE_TRACE_PATH:
+# Only enable tracing when explicitly requested via environment variable
+_THREE_TRACE_PATH = os.environ.get('THREE_TRACE_PATH')
+_TRACING_ENABLED = False
+
+def _enable_tracing() -> None:
+    """Enable HTTP tracing - only called when explicitly requested"""
+    global _TRACING_ENABLED
+    if _TRACING_ENABLED:
+        return  # Already enabled
+
+    if not _THREE_TRACE_PATH:
+        return  # No trace path specified
+
     try:
         # Ensure directory exists
         os.makedirs(os.path.dirname(_THREE_TRACE_PATH), exist_ok=True)
@@ -116,6 +127,7 @@ if _THREE_TRACE_PATH:
 
     # Monkey-patch requests to enable transparent tracing
     requests.Session.request = _traced_request  # type: ignore[assignment]
+    _TRACING_ENABLED = True
     print(f"🔍 HTTP tracing enabled: {_THREE_TRACE_PATH}")
 
 def resolve_cookie_db_for_ssid(ssid: str, config: Dict) -> Optional[str]:
@@ -379,10 +391,16 @@ def _get_live_cookies_from_chrome() -> Optional[str]:
             cookies_with_domains = load_cookies_with_domains(temp_db_path)
 
             if cookies_with_domains:
-                print(f"  ✅ Debug: Successfully read cookies from database copy")
-                # Convert to cookie header format for compatibility
-                cookie_header = '; '.join([f"{c['name']}={c['value']}" for c in cookies_with_domains])
-                return cookie_header
+                # Check if any cookies have non-empty values
+                non_empty_cookies = [c for c in cookies_with_domains if c['value']]
+                if non_empty_cookies:
+                    print(f"  ✅ Debug: Successfully read {len(non_empty_cookies)} non-empty cookies from database copy")
+                    # Convert to cookie header format for compatibility
+                    cookie_header = '; '.join([f"{c['name']}={c['value']}" for c in non_empty_cookies])
+                    return cookie_header
+                else:
+                    print("  ⚠️ Debug: All cookies are empty (likely encrypted)")
+                    return None
             else:
                 print("  ❌ Debug: No cookies found in database copy")
                 return None
@@ -1333,6 +1351,9 @@ def _accumulators_remaining_mb(data: Dict[str, Any]) -> Optional[int]:
 
 
 if __name__ == "__main__":
+    # Enable HTTP tracing if requested
+    _enable_tracing()
+
     # Accept SSID as optional argument
     ssid = sys.argv[1] if len(sys.argv) > 1 else None
 

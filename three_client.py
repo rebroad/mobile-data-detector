@@ -538,6 +538,88 @@ def _perform_oauth_login_with_render(session, config: Dict) -> bool:
 
         if not on_auth_now:
             print("  🔍 Browser OAuth: Still on www.three.co.uk after JS; will not click or submit. Waiting for site-driven redirect to auth.three.co.uk is required.")
+            # For diagnostics only: enumerate visible CTA-like elements that might initiate Auth0
+            try:
+                js_list_ctas = """
+                (function(){
+                  function textOf(el){
+                    try{ return (el.innerText||el.textContent||'').trim().replace(/\s+/g,' ').slice(0,120);}catch(e){return ''}
+                  }
+                  function attrs(el){
+                    var a={};
+                    try{ a.href=el.getAttribute('href')||''; }catch(e){}
+                    try{ a.role=el.getAttribute('role')||''; }catch(e){}
+                    try{ a.id=el.id||''; }catch(e){}
+                    try{ a.class=(el.className||'').toString(); }catch(e){}
+                    return a;
+                  }
+                  var candidates=[];
+                  var selectors = [
+                    'a[href*="auth.three.co.uk"]',
+                    'a[href*="/u/login"]',
+                    'a[href*="/authorize"]',
+                    'a[href*="/oauth"]',
+                    'button', 'a', 'div[role="button"]'
+                  ];
+                  var seen=new Set();
+                  for (var i=0;i<selectors.length;i++){
+                    var els = document.querySelectorAll(selectors[i]);
+                    for (var j=0;j<els.length;j++){
+                      var el=els[j];
+                      var info=attrs(el);
+                      var txt=textOf(el).toLowerCase();
+                      var looksLogin = /log in|login|sign in|my account|account|customer/i.test(txt);
+                      var looksAuth = (info.href||'').indexOf('auth.three.co.uk')>=0 || /\/(u\/login|authorize|oauth)/.test(info.href||'');
+                      if (looksLogin || looksAuth){
+                        var key=(info.href||'')+"|"+txt;
+                        if (!seen.has(key)){
+                          seen.add(key);
+                          candidates.push({text: txt.slice(0,120), href: info.href||'', role: info.role||'', id: info.id||'', class: info.class||''});
+                          if (candidates.length>=10) break;
+                        }
+                      }
+                    }
+                    if (candidates.length>=10) break;
+                  }
+                  return JSON.stringify(candidates);
+                })();
+                """
+                result = login_page.html.render(script=js_list_ctas, timeout=20)
+                # requests-html returns the page HTML after render; we need to fetch the JS evaluation result via console? Fallback: run a second lightweight eval
+                try:
+                    from pyppeteer.errors import NetworkError  # type: ignore
+                except Exception:
+                    NetworkError = Exception
+                try:
+                    # Try again with shorter timeout to capture evaluate return
+                    result = login_page.html.render(script=js_list_ctas, timeout=5)
+                except NetworkError:
+                    pass
+                # As requests-html doesn't expose direct return, re-run by writing to window.__CTAS and then read via a separate evaluate
+                js_store = js_list_ctas.replace('return JSON.stringify(candidates);','window.__CTAS = JSON.stringify(candidates); return "ok";')
+                try:
+                    _ = login_page.html.render(script=js_store, timeout=10)
+                    js_read = '(() => { try { return window.__CTAS || "[]" } catch(e){ return "[]" } })();'
+                    ctas_json = login_page.html.render(script=js_read, timeout=5)
+                except Exception:
+                    ctas_json = '[]'
+                try:
+                    ctas = json.loads(ctas_json) if isinstance(ctas_json, str) else []
+                except Exception:
+                    ctas = []
+                if ctas:
+                    print("  🔍 Browser OAuth: Detected possible login CTAs on current page (diagnostic only):")
+                    for idx, c in enumerate(ctas, 1):
+                        text = (c.get('text') or '')
+                        href = (c.get('href') or '')
+                        role = (c.get('role') or '')
+                        cid = (c.get('id') or '')
+                        cls = (c.get('class') or '')
+                        print(f"    [{idx}] text='{text}' href='{href}' role='{role}' id='{cid}' class='{cls}'")
+                else:
+                    print("  🔍 Browser OAuth: No obvious login CTAs detected on current page")
+            except Exception as e:
+                print(f"  ⚠️ Browser OAuth: CTA diagnostics failed: {e}")
 
         if not on_auth_now:
             print("  ❌ Browser OAuth: Still not on Auth0 login page; will not submit credentials on www.three.co.uk")

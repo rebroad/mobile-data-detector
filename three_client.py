@@ -302,39 +302,45 @@ def _perform_oauth_login(session, config: Dict) -> bool:
             'Cache-Control': 'max-age=0'
         })
 
-        # Step 1: Visit Three login page first (as seen in HAR)
-        print("  🔍 API OAuth: Visiting Three login page...")
+        # Step 1: Start OAuth flow from Three's login page (as seen in HAR)
+        print("  🔍 API OAuth: Starting from Three login page...")
         login_page = session.get('https://www.three.co.uk/login')
 
         if login_page.status_code != 200:
             print(f"  ❌ API OAuth: Login page failed: {login_page.status_code}")
             return False
 
-        # Step 2: Generate PKCE parameters (as seen in HAR)
-        code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
-        code_challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(code_verifier.encode('utf-8')).digest()
-        ).decode('utf-8').rstrip('=')
+        print(f"  🔍 API OAuth: Login page final URL: {login_page.url}")
 
-        state = secrets.token_urlsafe(32)
-        nonce = secrets.token_urlsafe(32)
+        # Step 2: Look for the login button/link that starts OAuth flow
+        import re
 
-        # Step 3: Start OAuth flow (exact parameters from HAR)
-        auth_params = {
-            'client_id': 'my3account',
-            'redirect_uri': 'https://www.three.co.uk/customer-logged',
-            'response_type': 'code',
-            'scope': 'openid profile',
-            'state': state,
-            'nonce': nonce,
-            'code_challenge': code_challenge,
-            'code_challenge_method': 'S256',
-            'audience': 'https://three-eu.eu.auth0.com/api/v2/'
-        }
+        # Find the OAuth authorization URL in the login page
+        auth_links = []
 
-        auth_url = 'https://three-eu.eu.auth0.com/authorize?' + urllib.parse.urlencode(auth_params)
+        # Look for various Auth0/OAuth patterns
+        patterns = [
+            r'href="(https://auth\.three\.co\.uk[^"]*)"',
+            r'href="([^"]*auth\.three\.co\.uk[^"]*)"',
+            r'action="([^"]*auth[^"]*)"',
+            r'data-url="([^"]*auth[^"]*)"',
+        ]
 
-        print("  🔍 API OAuth: Starting Auth0 authorization...")
+        for pattern in patterns:
+            matches = re.findall(pattern, login_page.text)
+            auth_links.extend(matches)
+
+        if not auth_links:
+            print("  ❌ API OAuth: No Auth0 authorization link found on login page")
+            return False
+
+        # Use the first Auth0 link found
+        auth_url = auth_links[0]
+        print(f"  🔍 API OAuth: Found OAuth URL: {auth_url[:80]}...")
+
+        # Step 3: Follow the OAuth authorization link (this should give us the login form with state)
+        print("  🔍 API OAuth: Following OAuth authorization link...")
+
         auth_response = session.get(auth_url, headers={
             'Referer': 'https://www.three.co.uk/',
             'Sec-Fetch-Dest': 'document',
@@ -343,11 +349,11 @@ def _perform_oauth_login(session, config: Dict) -> bool:
         })
 
         if auth_response.status_code != 200:
-            print(f"  ❌ API OAuth: Auth0 authorization failed: {auth_response.status_code}")
+            print(f"  ❌ API OAuth: OAuth authorization failed: {auth_response.status_code}")
             return False
 
-        # Step 4: Parse login form (check for anti-automation measures)
-        print("  🔍 API OAuth: Parsing Auth0 login form...")
+        # Step 4: Extract state parameter from URL or form (from HAR)
+        print("  🔍 API OAuth: Extracting login form parameters...")
 
         if 'captcha' in auth_response.text.lower() or 'recaptcha' in auth_response.text.lower():
             print("  ⚠️ API OAuth: CAPTCHA detected - need browser fallback")
@@ -357,34 +363,32 @@ def _perform_oauth_login(session, config: Dict) -> bool:
             print("  ⚠️ API OAuth: Bot detection triggered - need browser fallback")
             return False
 
-        # Extract form action and state
-        form_match = re.search(r'<form[^>]+action="([^"]+)"[^>]*>', auth_response.text)
-        if not form_match:
-            print("  ❌ API OAuth: No login form found")
+        # Extract state from URL (as seen in HAR file)
+        from urllib.parse import urlparse, parse_qs
+        parsed_url = urlparse(auth_response.url)
+        query_params = parse_qs(parsed_url.query)
+        state_param = query_params.get('state', [None])[0]
+
+        if not state_param:
+            print("  ❌ API OAuth: No state parameter found in login URL")
             return False
 
-        form_action = form_match.group(1)
+        print(f"  🔍 API OAuth: Extracted state parameter: {state_param[:20]}...")
 
-        # Extract all hidden fields and CSRF tokens
-        hidden_fields = {}
-        for match in re.finditer(r'<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"', auth_response.text):
-            hidden_fields[match.group(1)] = match.group(2)
-
-        print(f"  🔍 API OAuth: Found {len(hidden_fields)} form fields")
-
-        # Step 5: Submit credentials with exact headers from HAR
+        # Step 5: Submit credentials exactly as shown in HAR
         print("  🔍 API OAuth: Submitting login credentials...")
 
+        # From HAR: POST data format
         login_data = {
+            'state': state_param,
             'username': username,
-            'password': password,
-            'action': 'default',
-            **hidden_fields
+            'password': password
         }
 
+        # From HAR: exact headers
         login_headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'Origin': 'https://three-eu.eu.auth0.com',
+            'Origin': 'https://auth.three.co.uk',
             'Referer': auth_response.url,
             'Sec-Fetch-Dest': 'document',
             'Sec-Fetch-Mode': 'navigate',
@@ -392,8 +396,9 @@ def _perform_oauth_login(session, config: Dict) -> bool:
             'Sec-Fetch-User': '?1'
         }
 
+        # From HAR: POST to the same URL with state parameter
         login_response = session.post(
-            f"https://three-eu.eu.auth0.com{form_action}",
+            auth_response.url,  # POST to same URL as GET
             data=login_data,
             headers=login_headers,
             allow_redirects=True
